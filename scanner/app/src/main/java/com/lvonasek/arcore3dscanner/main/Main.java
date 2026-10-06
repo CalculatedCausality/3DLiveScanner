@@ -83,6 +83,7 @@ public class Main extends AbstractActivity implements View.OnClickListener,
   private boolean m3drRunning = false;
 
   private FrameLayout mHandMotionView;
+  private boolean mTrackedFrameSeen;
   private LinearLayout mLayoutQuickMenu;
   private LinearLayout mLayoutRec;
   private LinearLayout mLayoutUndo;
@@ -120,9 +121,7 @@ public class Main extends AbstractActivity implements View.OnClickListener,
   boolean mResourcePressurePaused = false;
   boolean mWriteFailed = false;
   boolean mHistoryFailed = false;
-  private boolean mRecoveringScan;
-  private boolean mFrameRejected;
-  private boolean mRecoveryPaused;
+  private int mReconstructionState;
   volatile boolean mResourcePausePending = false;
   volatile boolean mClearPending = false;
   boolean mShowGrid = false;
@@ -331,8 +330,10 @@ public class Main extends AbstractActivity implements View.OnClickListener,
     mLayoutUndo = findViewById(R.id.layout_undo);
     mLayoutView = findViewById(R.id.layout_view);
     mLayoutWait = findViewById(R.id.layout_wait);
-    findViewById(R.id.clear_button).setOnClickListener(this);
-    findViewById(R.id.save_button).setOnClickListener(this);
+    for (int id : new int[]{R.id.clear_button, R.id.save_button, R.id.undo_apply,
+        R.id.undo_cancel, R.id.undo_back, R.id.undo_back_fast, R.id.undo_fwd, R.id.undo_fwd_fast}) {
+      findViewById(id).setOnClickListener(this);
+    }
     mViewButton = findViewById(R.id.view_button);
     mViewButton.setVisibility(View.GONE);
     mViewButton.setOnClickListener(this);
@@ -340,12 +341,6 @@ public class Main extends AbstractActivity implements View.OnClickListener,
     mToggleButton.setOnClickListener(this);
     mUndoButton = findViewById(R.id.undo_button);
     mUndoButton.setOnClickListener(this);
-    findViewById(R.id.undo_apply).setOnClickListener(this);
-    findViewById(R.id.undo_cancel).setOnClickListener(this);
-    findViewById(R.id.undo_back).setOnClickListener(this);
-    findViewById(R.id.undo_back_fast).setOnClickListener(this);
-    findViewById(R.id.undo_fwd).setOnClickListener(this);
-    findViewById(R.id.undo_fwd_fast).setOnClickListener(this);
 
     if (isFaceModeOn(this)) {
       findViewById(R.id.clear_button).setVisibility(View.GONE);
@@ -498,7 +493,7 @@ public class Main extends AbstractActivity implements View.OnClickListener,
         mIndicators.setOverrideMessage(getString(R.string.scan_history_failed));
         return;
       }
-      if (mResourcePausePending || mClearPending) return;
+      if (mResourcePausePending) return;
       if (mPhotoMode) {
         JNI.onToggleButtonClicked(true);
       } else {
@@ -601,13 +596,13 @@ public class Main extends AbstractActivity implements View.OnClickListener,
     TextView status = findViewById(R.id.scan_status);
     boolean needsAttention = !m3drRunning && (mWriteFailed || mHistoryFailed || mResourcePressurePaused);
     int statusText = needsAttention ? R.string.scan_status_attention
-        : (mRecoveryPaused ? R.string.scan_retry_reconstruction
-        : (mRecoveringScan ? R.string.scan_recovering
+        : (mReconstructionState == 2 ? R.string.scan_retry_reconstruction
+        : (mReconstructionState == 1 ? R.string.scan_recovering
         : (isFaceModeOn(this) ? R.string.scan_status_face
         : (mPhotoMode ? R.string.scan_status_photo
         : (m3drRunning ? R.string.scan_status_live : R.string.scan_status_paused)))));
     String message = getString(statusText);
-    if (mFrameRejected && m3drRunning && !mPhotoMode)
+    if (mReconstructionState == 3 && m3drRunning && !mPhotoMode)
       message = getString(R.string.scan_frame_rejected);
     if (!android.text.TextUtils.equals(status.getText(), message)) status.setText(message);
   }
@@ -708,15 +703,10 @@ public class Main extends AbstractActivity implements View.OnClickListener,
   }
 
   void onReconstructionState(int state) {
-    boolean recovering = state == 1;
-    boolean paused = state == 2;
-    boolean rejected = state == 3;
-    boolean changed = mRecoveringScan != recovering || mRecoveryPaused != paused
-        || mFrameRejected != rejected;
-    mRecoveringScan = recovering;
-    mRecoveryPaused = paused;
-    mFrameRejected = rejected;
-    if (paused && m3drRunning) {
+    if (state < 0 || state > 3) state = 0;
+    boolean changed = mReconstructionState != state;
+    mReconstructionState = state;
+    if (state == 2 && m3drRunning) {
       m3drRunning = false;
       changed = true;
     }
@@ -908,16 +898,11 @@ public class Main extends AbstractActivity implements View.OnClickListener,
         CharSequence[] items;
         if (pointcloud) {
           items = new CharSequence[]{localModel};
-        } else if (isProVersion(this)) {
+        } else {
           items = new CharSequence[]{
                   localModel,
                   getString(R.string.screenshot),
                   getString(R.string.videoshot)
-          };
-        } else {
-          items = new CharSequence[]{
-                  localModel,
-                  getString(R.string.screenshot)
           };
         }
 
@@ -977,7 +962,8 @@ public class Main extends AbstractActivity implements View.OnClickListener,
     boolean tracked = JNI.onGlSurfaceDrawFrame(face, yaw, mViewCamera, mAnchors, grid, !mRecording);
     if (mFrameTimings != null)
       mFrameTimings.recordNativeDraw(nativeStart, System.nanoTime(), m3drRunning);
-    if (tracked) {
+    if (tracked && !mTrackedFrameSeen) {
+      mTrackedFrameSeen = true;
       runOnUiThread(() -> mHandMotionView.setVisibility(View.GONE));
     }
     if (JNI.didARjump()) {

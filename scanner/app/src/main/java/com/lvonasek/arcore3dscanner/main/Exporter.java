@@ -183,12 +183,11 @@ public class Exporter
 
       File model = new File(s);
       File staging = null;
-      File movedModel = null;
       boolean retainStaging = false;
       try {
         staging = IO.createStagingDirectory(model.getAbsoluteFile().getParentFile());
         copyResources(model, staging);
-        movedModel = new File(staging, model.getName());
+        File movedModel = new File(staging, model.getName());
         if (movedModel.exists() || !model.renameTo(movedModel)) {
           throw new IOException("Unable to stage model: " + model);
         }

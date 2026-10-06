@@ -89,7 +89,7 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
     mMsg = msg;
     mProgress = progress;
     mSeek = seek;
-    setMainScreen();
+    setScreen(Screen.MAIN, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_SELECT);
 
     mComplete = true;
     mInitialized = true;
@@ -168,29 +168,29 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
     if (view.getId() == R.id.editor0) {
       if ((mStatus == Status.SELECT_OBJECT) || (mStatus == Status.SELECT_CIRCLE) || (mStatus == Status.SELECT_RECT)) {
         mDeselect.setVisibility(View.GONE);
-        setMainScreen();
+        setScreen(Screen.MAIN, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_SELECT);
       } else if (mStatus == Status.UPDATE_COLORS) {
         mProgress.setVisibility(View.VISIBLE);
         new Thread(() -> {
             JNI.applyEffect(mEffect.ordinal(), mSeek.getProgress() - 127, 0);
             mContext.runOnUiThread(() -> mProgress.setVisibility(View.INVISIBLE));
           }).start();
-        setMainScreen();
+        setScreen(Screen.MAIN, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_SELECT);
       } else if (mStatus == Status.UPDATE_TRANSFORM) {
         applyTransform();
-        setMainScreen();
+        setScreen(Screen.MAIN, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_SELECT);
       } else
         save();
     }
     //main menu
     else if (view.getId() == R.id.editor1)
-      setSelectScreen();
+      setScreen(Screen.SELECT, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_COLORS);
     else if (view.getId() == R.id.editor2)
-      setColorScreen();
+      setScreen(Screen.COLOR, BUTTON_SUBMENU_COLORS, BUTTON_SUBMENU_TRANSFORM);
     else if (view.getId() == R.id.editor3)
-      setTransformScreen();
+      setScreen(Screen.TRANSFORM, BUTTON_SUBMENU_TRANSFORM, BUTTON_SUBMENU_VIEW);
     else if (view.getId() == R.id.editor4)
-      setViewScreen();
+      setScreen(Screen.EDIT, BUTTON_SUBMENU_VIEW, BUTTON_X);
 
     //selecting objects
     if (mScreen == Screen.SELECT) {
@@ -328,7 +328,7 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
     return false;
   }
 
-  private void initButtons()
+  private void setScreen(Screen screen, int firstButton, int endButton)
   {
     mMsg.setVisibility(View.GONE);
     mSeek.setVisibility(View.GONE);
@@ -341,6 +341,10 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
     mButtons.get(BUTTON_Z).setVisibility(View.GONE);
     mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_save_small);
     mBackShown = false;
+    for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
+      mButtons.get(i).setVisibility(i >= firstButton && i < endButton ? View.VISIBLE : View.GONE);
+    }
+    mScreen = screen;
   }
 
   private void save() {
@@ -387,51 +391,6 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
     builder.create().show();
   }
 
-  private void setMainScreen()
-  {
-    initButtons();
-    for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
-      mButtons.get(i).setVisibility(View.GONE);
-    }
-    mScreen = Screen.MAIN;
-  }
-
-  private void setColorScreen()
-  {
-    initButtons();
-    for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
-      mButtons.get(i).setVisibility(i >= BUTTON_SUBMENU_COLORS && i < BUTTON_SUBMENU_TRANSFORM ? View.VISIBLE : View.GONE);
-    }
-    mScreen = Screen.COLOR;
-  }
-
-  private void setSelectScreen()
-  {
-    initButtons();
-    for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
-      mButtons.get(i).setVisibility(i < BUTTON_SUBMENU_COLORS ? View.VISIBLE : View.GONE);
-    }
-    mScreen = Screen.SELECT;
-  }
-
-  private void setTransformScreen()
-  {
-    initButtons();
-    for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
-      mButtons.get(i).setVisibility(i >= BUTTON_SUBMENU_TRANSFORM && i < BUTTON_SUBMENU_VIEW ? View.VISIBLE : View.GONE);
-    }
-    mScreen = Screen.TRANSFORM;
-  }
-
-  private void setViewScreen()
-  {
-    initButtons();
-    for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
-      mButtons.get(i).setVisibility(i >= BUTTON_SUBMENU_VIEW && i < BUTTON_X ? View.VISIBLE : View.GONE);
-    }
-    mScreen = Screen.EDIT;
-  }
-
   private void startEffect(Effect effect, Status status, boolean axes)
   {
     mEffect = effect;
@@ -471,7 +430,7 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
   public void touchEvent(final MotionEvent event)
   {
     if (!mBackShown) {
-      setMainScreen();
+      setScreen(Screen.MAIN, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_SELECT);
       return;
     }
 
@@ -482,7 +441,7 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
         mContext.runOnUiThread(() -> mProgress.setVisibility(View.GONE));
       }).start();
       mStatus = Status.IDLE;
-      setSelectScreen();
+      setScreen(Screen.SELECT, BUTTON_SUBMENU_SELECT, BUTTON_SUBMENU_COLORS);
     }
 
     if (mStatus == Status.SELECT_CIRCLE) {

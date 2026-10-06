@@ -149,27 +149,24 @@ public class CameraControl {
                         mOrbit = 0.25f;
                     if(mOrbit > 1.5f)
                         mOrbit = 1.5f;
-                } else if (mView == ViewMode.ORBIT) {
-
-                    //limit the orbit zoom
-                    mOrbit -= diff;
-                    if(mOrbit < 1.0f) {
-                        diff = 1.0f - mOrbit;
-                        mOrbit = 1.0f;
-                    } else if(mOrbit > 15) {
-                        diff = 15.0f - mOrbit;
-                        mOrbit = 15;
+                } else if (mView == ViewMode.ORBIT || mViewMode) {
+                    if (mView == ViewMode.ORBIT) {
+                        //limit the orbit zoom
+                        mOrbit -= diff;
+                        if(mOrbit < 1.0f) {
+                            diff = 1.0f - mOrbit;
+                            mOrbit = 1.0f;
+                        } else if(mOrbit > 15) {
+                            diff = 15.0f - mOrbit;
+                            mOrbit = 15;
+                        } else {
+                            diff = 0;
+                        }
                     } else {
-                        diff = 0;
+                        diff *= 0.25f * Math.max(1.0, mMoveZ);
                     }
 
-                    //apply over limit movement
-                    double angle = -mYawM - mYawR;
-                    mMoveX += diff * Math.sin(angle) * Math.cos(mPitch);
-                    mMoveY -= diff * Math.cos(angle) * Math.cos(mPitch);
-                    mMoveZ += diff * Math.sin(mPitch);
-                } else if (mViewMode) {
-                    diff *= 0.25f * Math.max(1.0, mMoveZ);
+                    //apply orbit overflow or viewer movement
                     double angle = -mYawM - mYawR;
                     mMoveX += diff * Math.sin(angle) * Math.cos(mPitch);
                     mMoveY -= diff * Math.cos(angle) * Math.cos(mPitch);
@@ -258,14 +255,14 @@ public class CameraControl {
         mPrevious = mView;
         updateView(ViewMode.VR);
 
-        new Thread(() -> mActivity.runOnUiThread(() -> {
+        mActivity.runOnUiThread(() -> {
             String activity = Compatibility.isDaydreamSupported(mActivity)
                     ? "DaydreamActivity" : "CardboardActivity";
             Intent i = new Intent().setClassName(mActivity,
                     "com.lvonasek.arcore3dscanner.vr." + activity);
             i.setDataAndType(Uri.parse(filename), "text/plain");
             mActivity.startActivity(i);
-        })).start();
+        });
     }
 
     private float getMoveFactor() {
@@ -305,27 +302,9 @@ public class CameraControl {
     }
 
     public void setViewerMode(boolean face, boolean floorplan) {
-
-        mFirstViewButton.setOnClickListener(view -> {
-            mDistance.reset();
-            if (mEditor.initialized() && mEditor.movingLocked())
-                return;
-            updateView(CameraControl.ViewMode.FIRST);
-        });
-
-        mOrbitViewButton.setOnClickListener(view -> {
-            mDistance.reset();
-            if (mEditor.initialized() && mEditor.movingLocked())
-                return;
-            updateView(CameraControl.ViewMode.ORBIT);
-        });
-
-        mTopViewButton.setOnClickListener(view -> {
-            mDistance.reset();
-            if (mEditor.initialized() && mEditor.movingLocked())
-                return;
-            updateView(CameraControl.ViewMode.TOPDOWN);
-        });
+        setViewButton(mFirstViewButton, ViewMode.FIRST);
+        setViewButton(mOrbitViewButton, ViewMode.ORBIT);
+        setViewButton(mTopViewButton, ViewMode.TOPDOWN);
 
         mMoveX = 0;
         mMoveY = 0;
@@ -344,8 +323,17 @@ public class CameraControl {
         }
     }
 
+    private void setViewButton(ImageButton button, ViewMode mode) {
+        button.setOnClickListener(view -> {
+            mDistance.reset();
+            if (mEditor.initialized() && mEditor.movingLocked())
+                return;
+            updateView(mode);
+        });
+    }
+
     public void updateButtons() {
-        if (mEditor.initialized()) {
+        if (mView != ViewMode.FACE && mEditor.initialized()) {
             final int visibility = mTopViewButton.getVisibility();
             final int newVisibility = mEditor.movingLocked() ? View.GONE : View.VISIBLE;
             if (visibility != newVisibility) {

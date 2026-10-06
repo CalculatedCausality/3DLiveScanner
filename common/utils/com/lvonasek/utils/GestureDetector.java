@@ -42,10 +42,7 @@ public class GestureDetector
       public boolean onScale(ScaleGestureDetector detector) {
         if (mListener != null) {
           float f = detector.getScaleFactor() - 1.0f;
-          if (f > 0)
-            mListener.OnPinchToZoom((f - last) * 4.0f);
-          else
-            mListener.OnPinchToZoom((f - last) * 8.0f);
+          mListener.OnPinchToZoom((f - last) * (f > 0 ? 4.0f : 8.0f));
           last = f;
         }
         return false;
@@ -94,8 +91,7 @@ public class GestureDetector
               mAngle += gap;
             mLastAngle = angle;
 
-            if (mListener != null)
-              mListener.OnTwoFingerRotation(mAngle);
+            mListener.OnTwoFingerRotation(mAngle);
           }
 
           float dfX = frX - nfX;
