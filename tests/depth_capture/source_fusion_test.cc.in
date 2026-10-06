@@ -1,0 +1,91 @@
+// Appended to the production-reference SDK fixture by motion_run.py.
+#include <arcore/depth_measurement.h>
+#include <tango_3d_reconstruction_api.h>
+#include "recorded_geometry.h"
+#include <array>
+#include <limits>
+
+struct Coverage {double wall=0,floor=0,maxError=0;size_t faces=0;};
+Coverage captureRoom(bool dense) {
+    assert(live.empty());oc::ARCore ar;
+    auto config=Tango3DR_Config_create(TANGO_3DR_CONFIG_RECONSTRUCTION);assert(config);
+    assert(Tango3DR_Config_setDouble(config,"resolution",.02)==0);
+    assert(Tango3DR_Config_setDouble(config,"min_depth",.05)==0);
+    assert(Tango3DR_Config_setDouble(config,"max_depth",8)==0);
+    assert(Tango3DR_Config_setBool(config,"generate_color",false)==0);
+    assert(Tango3DR_Config_setInt32(config,"min_num_vertices",9)==0);
+    assert(Tango3DR_Config_setInt32(config,"max_update_chunks",512)==0);
+    auto context=Tango3DR_ReconstructionContext_create(config);assert(context);Tango3DR_Config_destroy(config);
+    std::set<std::array<int,3>> keys;glm::mat4 previousGauge(1);
+    for(int frame=0;frame<30;++frame) {
+        glm::mat4 gauge=glm::translate(glm::mat4(1),glm::vec3(.15f*std::sin(frame*.13f),.2f*std::sin(frame*.17f),0));
+        gauge=glm::rotate(gauge,.1f*std::sin(frame*.11f),glm::vec3(0,1,0));
+        for(auto* anchor:live)anchor->matrix=(gauge*glm::inverse(previousGauge))*anchor->matrix;
+        previousGauge=gauge;
+        glm::vec3 eye(.3f*std::sin(frame*.19f),1.2f,.15f*std::cos(frame*.14f));
+        auto physicalView=glm::lookAt(eye,glm::vec3(0,.5f,-2),glm::vec3(0,1,0));
+        auto rawView=physicalView*glm::inverse(gauge);
+        assert(ar.UpdateReferenceFrame(rawView));
+        auto view=rawView*ar.GetZeroTransform();
+        // Match the captured Pixel's projected native-depth sampling: about
+        // 64 visible columns by 160 rows, with these measured NDC focal terms.
+        // The earlier 64x48 toy grid was substantially sparser than this device.
+        auto projection=glm::perspective(glm::radians(65.f),64.f/160,.001f,100.f);
+        projection[0][0]=3.045f;projection[1][1]=1.465f;
+        oc::geometry::DepthProjection actual,oracle;
+        assert(actual.Configure(projection,view)&&oracle.Configure(projection,physicalView));
+        glm::mat4 color=glm::inverse(view)*glm::rotate(glm::mat4(1),glm::radians(180.f),glm::vec3(1,0,0));
+        auto inverseColor=glm::inverse(glm::dmat4(color));
+        std::vector<std::array<float,4>> points;
+        for(int y=0;y<160;++y)for(int x=0;x<64;++x) {
+            glm::dvec2 uv(2.*x/64-1,1-2.*y/160);auto ray=oracle.Ray(uv);
+            double floor=ray.y<0?-oracle.origin.y/ray.y:100;
+            double wall=ray.z<0?(-2-oracle.origin.z)/ray.z:100;
+            double depth=std::min(floor,wall);if(depth<.05||depth>8)continue;
+            bool measuredInput=floor<wall && x%3!=0;
+            uint16_t raw=measuredInput?uint16_t(std::round(depth*1000)):0;
+            uint16_t estimate=uint16_t(std::round(depth*1000+1.5*std::sin(x*13+y*7+frame)));
+            double d=0;float weight=0;bool measured=false;
+            bool valid=dense?oc::geometry::SelectDepth(raw,measuredInput?230:0,estimate,128,d,weight,measured):
+                             oc::geometry::MeasuredDepth(raw,measuredInput?230:0,128,d,weight);
+            if(!valid)continue;
+            auto p=actual.Point(uv,d);auto camera=inverseColor*glm::dvec4(p.x,p.y,p.z,1);
+            points.push_back({{float(camera.x),float(camera.y),float(camera.z),weight}});
+        }
+        Tango3DR_Pose pose{};auto q=glm::quat_cast(color);
+        pose.orientation[0]=q.x;pose.orientation[1]=q.y;pose.orientation[2]=q.z;pose.orientation[3]=q.w;
+        for(int j=0;j<3;++j)pose.translation[j]=color[3][j];
+        Tango3DR_PointCloud cloud{frame*.033,uint32_t(points.size()),reinterpret_cast<Tango3DR_Vector4*>(points.data())};
+        Tango3DR_GridIndexArray dirty{};
+        assert(Tango3DR_updateFromPointCloud(context,&cloud,&pose,nullptr,nullptr,&dirty)==0);
+        for(unsigned i=0;i<dirty.num_indices;++i)keys.insert({{dirty.indices[i][0],dirty.indices[i][1],dirty.indices[i][2]}});
+        Tango3DR_GridIndexArray_destroy(&dirty);
+    }
+    Coverage result;std::vector<recorded::Triangle> triangles;
+    for(const auto& key:keys) {
+        Tango3DR_Mesh mesh{};assert(Tango3DR_extractMeshSegment(context,key.data(),&mesh)==0);result.faces+=mesh.num_faces;
+        for(unsigned i=0;i<mesh.num_vertices;++i)result.maxError=std::max(result.maxError,std::min(std::abs(double(mesh.vertices[i][1])),std::abs(double(mesh.vertices[i][2])+2)));
+        for(unsigned i=0;i<mesh.num_faces;++i) {
+            auto a=mesh.vertices[mesh.faces[i][0]],b=mesh.vertices[mesh.faces[i][1]],c=mesh.vertices[mesh.faces[i][2]];
+            triangles.push_back({{a[0],a[1],a[2]},{b[0],b[1],b[2]},{c[0],c[1],c[2]}});
+        }
+        Tango3DR_Mesh_destroy(&mesh);
+    }
+    recorded::BVH surface(triangles);int samples=0;
+    for(int x=-6;x<=6;++x)for(int y=0;y<=10;++y) {
+        ++samples;
+        result.wall+=surface.distance(recorded::V(x*.1,.3+y*.1,-2))<.04;
+        result.floor+=surface.distance(recorded::V(x*.08,0,-1.1-y*.07))<.04;
+    }
+    result.wall/=samples;result.floor/=samples;
+    Tango3DR_ReconstructionContext_destroy(context);
+    cleanup(ar);assert(live.empty());
+    return result;
+}
+int main() {
+    auto raw=captureRoom(false),dense=captureRoom(true);
+    std::printf("source/fusion room: raw wall=%.3f floor=%.3f faces=%zu; dense wall=%.3f floor=%.3f faces=%zu max_surface_error_m=%.6f\n",raw.wall,raw.floor,raw.faces,dense.wall,dense.floor,dense.faces,dense.maxError);
+    std::fflush(stdout);
+    assert(raw.wall<.1&&dense.wall>.8&&dense.floor>.9&&dense.maxError<.03);
+    assert(dense.floor>=raw.floor-.02);
+}

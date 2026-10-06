@@ -1,0 +1,143 @@
+// Production reference management under coherent SDK world-coordinate updates.
+#include <arcore/geometry_validation.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <cassert>
+#include <set>
+#include <array>
+#include <vector>
+#include <utility>
+#include <cstdio>
+#define LOGI(...) ((void)0)
+struct ArSession{};
+using ArStatus=int;const int AR_SUCCESS=0;
+enum ArTrackingState{AR_TRACKING_STATE_TRACKING,AR_TRACKING_STATE_PAUSED,AR_TRACKING_STATE_STOPPED};
+struct ArPose{glm::mat4 matrix{1};};
+struct ArAnchor{glm::mat4 matrix{1};ArTrackingState state=AR_TRACKING_STATE_TRACKING;bool detached=false;};
+static std::set<ArAnchor*> live;
+static int created=0,released=0;
+static bool failCreate=false;
+static ArTrackingState newAnchorState=AR_TRACKING_STATE_TRACKING;
+void ArPose_create(ArSession*,const float* p,ArPose** pose) {
+    *pose=new ArPose;
+    (*pose)->matrix=glm::mat4_cast(glm::quat(p[3],p[0],p[1],p[2]));
+    (*pose)->matrix[3]=glm::vec4(p[4],p[5],p[6],1);
+}
+void ArPose_destroy(ArPose* pose){delete pose;}
+int ArSession_acquireNewAnchor(ArSession*,ArPose* pose,ArAnchor** anchor) {
+    if(failCreate){*anchor=nullptr;return 1;}
+    *anchor=new ArAnchor;(*anchor)->matrix=pose->matrix;(*anchor)->state=newAnchorState;live.insert(*anchor);++created;return 0;
+}
+void ArAnchor_getTrackingState(ArSession*,ArAnchor* anchor,ArTrackingState* state){*state=anchor->state;}
+void ArAnchor_getPose(ArSession*,ArAnchor* anchor,ArPose* pose){pose->matrix=anchor->matrix;}
+void ArAnchor_detach(ArSession*,ArAnchor* anchor){assert(!anchor->detached);anchor->detached=true;}
+void ArAnchor_release(ArAnchor* anchor){assert(anchor->detached&&live.erase(anchor)==1);delete anchor;++released;}
+namespace oc {
+int64_t NowMs(){static int64_t now=0;return now+=2000;}
+struct Key{glm::mat4 matrix{1};};
+struct ARCore {
+    ArSession session;ArSession* ar_session_=&session;
+    std::pair<Key,ArAnchor*> ar_zero_{Key{},nullptr};
+    glm::mat4 zero_transform_{1};bool reference_valid_=false;int64_t last_reference_attempt_ms_=0;
+    struct Reference {ArAnchor* anchor=nullptr;glm::mat4 model_pose{1};};
+    std::array<Reference,32> reference_history_;
+    size_t reference_count_=0,active_reference_=0;uint64_t reference_revisits_=0;
+    glm::mat4 GetMatrix(ArPose* pose){return pose->matrix;}
+    bool UpdateReferenceFrame(const glm::mat4&);glm::mat4 GetZeroTransform();std::vector<glm::vec3> GetActiveAnchors();
+};
+// PRODUCTION_REFERENCE
+// PRODUCTION_ORIGIN
+// PRODUCTION_ANCHORS
+}
+void cleanup(oc::ARCore& ar) {
+    for(size_t i=0;i<ar.reference_count_;++i) {
+        ArAnchor_detach(ar.ar_session_,ar.reference_history_[i].anchor);
+        ArAnchor_release(ar.reference_history_[i].anchor);ar.reference_history_[i].anchor=nullptr;
+    }
+    ar.ar_zero_.second=nullptr;ar.reference_count_=0;
+}
+double error(const glm::mat4& a,const glm::mat4& b) {
+    double result=0;
+    for(int i=0;i<4;++i)for(int j=0;j<4;++j)result=std::max(result,double(std::abs(a[i][j]-b[i][j])));
+    return result;
+}
+int main() {
+    oc::ARCore ar;
+    glm::mat4 previousGauge(1),lastRaw(1),lastGauge(1);
+    double maxError=0,unanchoredError=0;
+    for(int frame=0;frame<60;++frame) {
+        glm::mat4 gauge=glm::translate(glm::mat4(1),glm::vec3(.3f*std::sin(frame*.07f),.2f*std::sin(frame*.09f),.1f*std::sin(frame*.05f)));
+        gauge=glm::rotate(gauge,.15f*std::sin(frame*.08f),glm::vec3(0,1,0));
+        const glm::mat4 delta=gauge*glm::inverse(previousGauge);
+        for(auto* anchor:live)anchor->matrix=delta*anchor->matrix;
+        previousGauge=gauge;
+        const glm::vec3 eye(.2f*frame,1.5f,.2f*std::sin(frame*.03f));
+        const glm::mat4 expected=glm::lookAt(eye,eye+glm::vec3(0,-.5f,-2),glm::vec3(0,1,0));
+        const glm::mat4 raw=expected*glm::inverse(gauge);
+        assert(ar.UpdateReferenceFrame(raw));
+        assert(ar.reference_valid_&&!ar.GetActiveAnchors().empty());
+        maxError=std::max(maxError,error(raw*ar.GetZeroTransform(),expected));
+        unanchoredError=std::max(unanchoredError,error(raw,expected));
+        assert(live.size()==ar.reference_count_);
+        lastRaw=raw;lastGauge=gauge;
+    }
+    assert(created>=3&&maxError<.00005&&unanchoredError>.1);
+    auto* retained=ar.ar_zero_.second;
+    retained->state=AR_TRACKING_STATE_PAUSED;
+    assert(!ar.UpdateReferenceFrame(lastRaw)&&!ar.reference_valid_&&ar.GetActiveAnchors().empty());
+    retained->state=AR_TRACKING_STATE_TRACKING;
+    assert(ar.UpdateReferenceFrame(lastRaw));
+    const glm::vec3 reference=ar.ar_zero_.first.matrix[3];
+    const glm::vec3 far=reference+glm::vec3(9,0,0);
+    const glm::mat4 farModel=glm::lookAt(far,far+glm::vec3(0,0,-1),glm::vec3(0,1,0));
+    const glm::mat4 farRaw=farModel*glm::inverse(lastGauge);
+    failCreate=true;
+    assert(!ar.UpdateReferenceFrame(farRaw)&&ar.ar_zero_.second==retained&&live.size()==ar.reference_count_);
+    failCreate=false;
+    assert(ar.UpdateReferenceFrame(farRaw)&&error(farRaw*ar.GetZeroTransform(),farModel)<.00005);
+    cleanup(ar);
+    assert(live.empty()&&created==released);
+    const int handoffs=created-1;
+    oc::ARCore delayed;newAnchorState=AR_TRACKING_STATE_PAUSED;
+    assert(!delayed.UpdateReferenceFrame(glm::mat4(1))&&delayed.ar_zero_.second&&live.size()==1);
+    const int beforeReady=created;delayed.ar_zero_.second->state=AR_TRACKING_STATE_TRACKING;newAnchorState=AR_TRACKING_STATE_TRACKING;
+    assert(delayed.UpdateReferenceFrame(glm::mat4(1))&&created==beforeReady);
+    cleanup(delayed);
+    assert(live.empty()&&created==released);
+    // Different local anchors can be refined independently by ARCore. Return
+    // to A must reuse A's original model reference, not create C from B's offset.
+    oc::ARCore revisit;
+    const auto viewA=glm::lookAt(glm::vec3(0,1.5,0),glm::vec3(0,1.5,-1),glm::vec3(0,1,0));
+    const auto viewB=glm::lookAt(glm::vec3(5,1.5,0),glm::vec3(5,1.5,-1),glm::vec3(0,1,0));
+    assert(revisit.UpdateReferenceFrame(viewA));auto* a=revisit.ar_zero_.second;
+    assert(revisit.UpdateReferenceFrame(viewB));auto* b=revisit.ar_zero_.second;
+    assert(a!=b&&live.size()==2&&revisit.reference_count_==2);
+    b->matrix[3][1]+=.2f;
+    const auto localShift=glm::translate(glm::mat4(1),glm::vec3(0,.2,0));
+    const auto shiftedB=viewB*glm::inverse(localShift);
+    assert(revisit.UpdateReferenceFrame(shiftedB)&&error(shiftedB*revisit.GetZeroTransform(),viewB)<.00005);
+    const int beforeReturn=created;
+    assert(revisit.UpdateReferenceFrame(viewA));
+    assert(revisit.ar_zero_.second==a&&created==beforeReturn&&revisit.reference_revisits_==1);
+    assert(error(viewA*revisit.GetZeroTransform(),viewA)<.00005);
+    // A known revisit whose local reference is unavailable must not quietly
+    // continue using another region's correction.
+    assert(revisit.UpdateReferenceFrame(shiftedB));a->state=AR_TRACKING_STATE_PAUSED;
+    assert(!revisit.UpdateReferenceFrame(viewA)&&!revisit.reference_valid_);
+    a->state=AR_TRACKING_STATE_TRACKING;
+    assert(revisit.UpdateReferenceFrame(viewA)&&revisit.ar_zero_.second==a);
+    cleanup(revisit);assert(live.empty()&&created==released);
+    oc::ARCore bounded;
+    for(int i=0;i<32;++i) {
+        const glm::vec3 p(float(i*5),1.5,0);
+        assert(bounded.UpdateReferenceFrame(glm::lookAt(p,p+glm::vec3(0,0,-1),glm::vec3(0,1,0))));
+    }
+    assert(bounded.reference_count_==32&&live.size()==32);
+    auto* originalReference=bounded.reference_history_[0].anchor;
+    const glm::vec3 beyond(165,1.5,0);
+    assert(!bounded.UpdateReferenceFrame(glm::lookAt(beyond,beyond+glm::vec3(0,0,-1),glm::vec3(0,1,0))));
+    assert(bounded.reference_count_==32&&bounded.reference_history_[0].anchor==originalReference);
+    assert(bounded.UpdateReferenceFrame(viewA)&&bounded.ar_zero_.second==originalReference);
+    cleanup(bounded);assert(live.empty()&&created==released);
+    std::printf("PASS session reference: SDK rebase invariance max_error=%.9f, nearby hand-offs=%d, deferred anchor, local revisit reuse, unavailable-reference rejection and cleanup\n",maxError,handoffs);
+}

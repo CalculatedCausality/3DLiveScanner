@@ -1,0 +1,97 @@
+// Real UpdateFeaturePoints/ToPoint bodies with owned SDK image fixtures.
+#include <arcore/depth_measurement.h>
+#include <depth/frame_capture.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <cassert>
+#include <map>
+#include <memory>
+#include <vector>
+#include <climits>
+#include <cstdio>
+#define LOGE(...) ((void)0)
+#define LOGI(...) ((void)0)
+struct ArSession{};struct ArFrame{};struct ArPointCloud{};
+struct ArImage{int which;};
+using ArStatus=int;const int AR_SUCCESS=0;
+static ArImage rawImage{0},confidenceImage{1},smoothImage{2};
+static int width=16,height=12,secondaryAcquires=0,releases=0;
+static std::vector<uint8_t> depthBytes,confidenceBytes,smoothBytes;
+static int64_t timestamp=1000;
+int ArFrame_acquireRawDepthImage16Bits(ArSession*,ArFrame*,ArImage** image){*image=&rawImage;return 0;}
+int ArFrame_acquireDepthImage16Bits(ArSession*,ArFrame*,ArImage** image){++secondaryAcquires;*image=&smoothImage;return 0;}
+int ArFrame_acquireRawDepthConfidenceImage(ArSession*,ArFrame*,ArImage** image){*image=&confidenceImage;return 0;}
+int ArFrame_acquirePointCloud(ArSession*,ArFrame*,ArPointCloud**){return 1;}
+void ArPointCloud_getNumberOfPoints(ArSession*,ArPointCloud*,int* n){*n=0;}
+void ArPointCloud_getData(ArSession*,ArPointCloud*,const float** p){*p=nullptr;}
+void ArPointCloud_release(ArPointCloud*){}
+void ArImage_release(ArImage*){++releases;}
+void ArImage_getTimestamp(ArSession*,ArImage*,int64_t* t){*t=timestamp;}
+void ArFrame_getTimestamp(ArSession*,ArFrame*,int64_t* t){*t=timestamp+100;}
+
+namespace oc {
+using ScopedImage=std::unique_ptr<ArImage,decltype(&ArImage_release)>;
+void ReportStatus(const char*,ArStatus,ArStatus&){}
+geometry::Plane ReadPlane(ArSession*,ArImage* image) {
+    geometry::Plane plane;plane.width=width;plane.height=height;
+    const auto& bytes=image->which==0?depthBytes:image->which==1?confidenceBytes:smoothBytes;
+    plane.pixelStride=image->which==1?1:2;plane.rowStride=width*plane.pixelStride;
+    plane.data=bytes.data();plane.length=bytes.size();return plane;
+}
+struct Camera {
+    void InitARCore(ArSession*,ArFrame*){}
+    glm::vec2 Transform(int x,int y,float w,float h){return glm::vec2(2*x/w-1,1-2*y/h);}
+};
+struct ARCore {
+    bool frame_valid_=true,reference_valid_=true,face_mode_=false,useDepth=true,useDepthRaw=true,useSmoothedDepth=true,has_depth_sensor=false;
+    bool depth_test_enabled_=true,has_coordinate_system_=false;
+    uint64_t depth_test_generation_=7,depth_source_frames_=0,depth_source_points_=0,depth_source_repeated_=0,depth_source_estimated_=0;
+    int64_t lastDepthTimestamp=0;float offset=0,resolution=.02f;
+    int last_depth_error_=0;ArSession* ar_session_=nullptr;ArFrame* ar_frame_=nullptr;
+    Camera camera;glm::mat4 view_mat{1},projection_mat{1};geometry::DepthProjection depth_projection_;
+    std::vector<glm::vec4> points;std::shared_ptr<depth_test::Frame> depth_test_frame_;
+    bool UpdateAnchor(){return true;}glm::mat4 GetZeroTransform(){return glm::mat4(1);}
+    void LogDepthCalibration(int,int){}
+    glm::vec4 ToPoint(glm::dmat4&,double&,int32_t&,int32_t&,int&,int&,double&);
+    void UpdateFeaturePoints();
+};
+// PRODUCTION_POINT
+// PRODUCTION_CAPTURE
+}
+
+static void putDepth(std::vector<uint8_t>& bytes,int at,unsigned depth) {
+    bytes[2*at]=depth&255;bytes[2*at+1]=depth>>8;
+}
+int main() {
+    depthBytes.resize(width*height*2);confidenceBytes.resize(width*height);smoothBytes.resize(width*height*2);
+    oc::ARCore ar;ar.projection_mat=glm::perspective(glm::radians(60.f),float(width)/height,.001f,100.f);
+    for(int i=0;i<width*height;++i) {
+        putDepth(depthBytes,i,2000+i);putDepth(smoothBytes,i,2050+i);
+        confidenceBytes[i]=(i%4==0)?0:(i%4==1)?128:(i%4==2)?129:255;
+    }
+    ar.UpdateFeaturePoints();
+    assert(secondaryAcquires==1&&releases==3&&ar.points.size()==size_t(width*height));
+    assert(ar.depth_test_frame_&&ar.depth_test_frame_->links.size()==ar.points.size()/2);
+    for(const auto& link:ar.depth_test_frame_->links) {
+        const int i=link.pixel;const auto& p=ar.points[link.point];
+        assert(p==link.original&&p.w==confidenceBytes[i]/255.f);
+        assert(std::abs(p.z+(2000+i)*.001f)<1e-6);
+        assert(link.depth==ar.depth_test_frame_->depth[i]);
+    }
+    const auto original=ar.points;
+    for(int i=0;i<width*height;++i)if(confidenceBytes[i]<=128) {
+        assert(ar.points[i].w==.1f);
+        assert(std::abs(ar.points[i].z+(2050+i)*.001f)<1e-6);
+    }
+    for(int i=0;i<width*height;++i)putDepth(smoothBytes,i,5000-i);
+    ++timestamp;ar.UpdateFeaturePoints();
+    assert(secondaryAcquires==2);
+    for(int i=0;i<width*height;++i)if(confidenceBytes[i]>128)assert(ar.points[i]==original[i]);
+    // Missing raw and dense observations do not invent geometry.
+    for(int i=0;i<width*height;++i){putDepth(depthBytes,i,0);putDepth(smoothBytes,i,0);}
+    ++timestamp;ar.UpdateFeaturePoints();assert(ar.points.empty());
+    for(int i=0;i<width*height;++i)putDepth(smoothBytes,i,9000);
+    ++timestamp;ar.UpdateFeaturePoints();assert(ar.points.empty());
+    ar.reference_valid_=false;const int acquired=secondaryAcquires;
+    ++timestamp;ar.UpdateFeaturePoints();assert(ar.points.empty()&&secondaryAcquires==acquired);
+    std::puts("PASS production depth selection: measured samples unchanged, dense support lower-weight/bounded, no missing-data fabrication, tracking-reference admission");
+}

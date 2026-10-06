@@ -1,0 +1,58 @@
+#include <depth/record.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <cassert>
+#include <atomic>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <unistd.h>
+namespace oc {
+enum {COLOR_CAMERA=0};
+static bool enabled=true,pauseRequested=false,stale=false,throws=false,failWrite=false;
+static uint64_t generation=7;
+static std::string fallback;
+static std::atomic<bool>* running=nullptr;
+namespace depth_test {
+Runtime::Runtime(){} Runtime::~Runtime(){}
+bool Runtime::Enabled()const{return enabled;}
+uint64_t Runtime::Generation()const{return generation;}
+void Runtime::Fallback(const std::string& why){fallback=why;}
+bool Runtime::Apply(const Frame&,std::vector<glm::vec4>& points,Stats& s){
+    points[0].x+=.01f;s.changed=1;s.inferred=true;
+    if(pauseRequested)running->store(false);
+    if(stale)++generation;
+    if(throws)throw std::runtime_error("injected");
+    return true;
+}
+}
+struct Dataset {std::string path;std::string GetFileName(int,const std::string& suffix){return path+(failWrite?"/missing/":"/")+"frame"+suffix;}};
+struct Reconstruction {
+    std::shared_ptr<depth_test::Frame> frame_depth_test;
+    std::vector<glm::vec4> frame_points;
+    std::vector<glm::mat4> frame_pose{glm::mat4(1)};
+    depth_test::Runtime depth_test_runtime;
+    struct Scan {double MinimumDepth(){return .1;}double MaximumDepth(){return 4;}}scan;
+    struct Texturize {int GetLatestIndex(Dataset*){return -1;}}texturize;
+    Dataset* dataset;
+    std::atomic<bool> t3dr_is_running_{true};
+    void ApplyExperimentalDepth();
+};
+// PRODUCTION_METHOD
+}
+int main(int argc,char**argv){
+    assert(argc==2);using namespace oc;Dataset data{argv[1]};
+    for(int mode=0;mode<5;++mode){
+        pauseRequested=mode==1;stale=mode==2;throws=mode==3;failWrite=mode==4;generation=7;fallback.clear();
+        Reconstruction r;r.dataset=&data;running=&r.t3dr_is_running_;
+        r.frame_points={glm::vec4(1,2,3,1)};auto original=r.frame_points;
+        r.frame_depth_test=std::make_shared<depth_test::Frame>();
+        r.frame_depth_test->width=r.frame_depth_test->height=1;
+        r.frame_depth_test->pointCount=1;
+        r.frame_depth_test->depth={2};r.frame_depth_test->confidence={1};r.frame_depth_test->generation=7;
+        std::string path=data.path+"/frame.tpu";unlink(path.c_str());
+        r.ApplyExperimentalDepth();assert(!r.frame_depth_test);
+        if(mode==0){assert(r.frame_points!=original&&access(path.c_str(),F_OK)==0);unlink(path.c_str());}
+        else {assert(r.frame_points==original&&access(path.c_str(),F_OK)!=0);}
+    }
+    std::cout<<"PASS worker backup-before-commit, pause/stale/exception/write-failure rollback\n";
+}

@@ -1,0 +1,34 @@
+#include <glm/glm.hpp>
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+namespace oc {
+struct ARCoreCamera {
+    glm::ivec2 dx,dy;float minX,minY,maxX,maxY,transformed_uvs_[8];
+    bool aabb_initialized_=false;float aabb_width_=0,aabb_height_=0;
+    glm::vec2 Transform(int,int,float,float);glm::ivec2 Axis(glm::vec2);
+};
+// PRODUCTION_TRANSFORM
+// PRODUCTION_AXIS
+}
+int main() {
+    const float cropped[8]={.125f,.75f,.875f,.75f,.125f,.25f,.875f,.25f};
+    const int dimensions[5][2]={{160,90},{320,180},{160,120},{256,192},{640,480}};
+    for(int rotation=0;rotation<4;++rotation) {
+        oc::ARCoreCamera camera;
+        for(int i=0;i<4;++i) {
+            float u=cropped[2*i],v=cropped[2*i+1];
+            for(int r=0;r<rotation;++r){float old=u;u=v;v=1-old;}
+            camera.transformed_uvs_[2*i]=u;camera.transformed_uvs_[2*i+1]=v;
+        }
+        glm::vec2 expected(0);
+        for(int i=0;i<5;++i) {
+            int w=dimensions[i][0],h=dimensions[i][1];
+            auto actual=camera.Transform(w/4,h/6,float(w),float(h));
+            if(i==0)expected=actual;
+            assert(glm::length(actual-expected)<1e-6);
+            assert(glm::length(camera.Transform(w/2,h/2,float(w),float(h)))<1e-6);
+        }
+    }
+    std::puts("PASS production UV cache: cropped/rotated mapping stays invariant across native depth dimension changes");
+}

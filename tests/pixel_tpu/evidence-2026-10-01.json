@@ -1,0 +1,61 @@
+{
+  "run_directory": "/tmp/opencode/pixel-tpu/run-03",
+  "model_directory": "/tmp/opencode/pixel-tpu/models-01",
+  "started_utc": "2026-09-30T17:32:01.799345+00:00",
+  "model": "Pixel 9 Pro XL",
+  "fingerprint": "google/komodo/komodo:17/CP3A.260905.009/16091614:user/release-keys",
+  "android_api": 37,
+  "driver": "google-edgetpu",
+  "driver_version": "2.0",
+  "driver_feature_level": 1000008,
+  "source_sha256": "b4f7cdc89606d588765442cac576a1c38d0be1e1dd30baafa3b150f6111cba23",
+  "binary_sha256": "d6568581fc43c6c42a6fe1c3891d992c76f6c57c15ce95b593085329cff107ab",
+  "runner_exit_code": 1,
+  "remote_cleanup_exit_code": 0,
+  "warmups": 3,
+  "measured_iterations": 15,
+  "trained_weights": false,
+  "quantized_cases": [
+    {"case":"conv", "tpu_p50_ms":1.001546, "tpu_p95_ms":1.586792, "cpu_p50_ms":5.715617, "max_code_difference":1, "exit_code":0},
+    {"case":"depthwise", "tpu_p50_ms":1.803711, "tpu_p95_ms":2.551026, "cpu_p50_ms":5.218383, "max_code_difference":1, "exit_code":0},
+    {"case":"pointwise", "tpu_p50_ms":1.885865, "tpu_p95_ms":2.476481, "cpu_p50_ms":3.896444, "max_code_difference":1, "exit_code":0},
+    {"case":"pool", "tpu_p50_ms":1.623494, "tpu_p95_ms":2.094686, "cpu_p50_ms":0.770548, "max_code_difference":1, "exit_code":0},
+    {"case":"resize", "tpu_p50_ms":0.981486, "tpu_p95_ms":1.726929, "cpu_p50_ms":1.118327, "max_code_difference":1, "exit_code":0},
+    {"case":"concat", "tpu_p50_ms":2.408040, "tpu_p95_ms":2.522380, "cpu_p50_ms":0.436076, "max_code_difference":0, "exit_code":0},
+    {"case":"add", "tpu_p50_ms":2.136474, "tpu_p95_ms":2.487427, "cpu_p50_ms":0.417033, "max_code_difference":0, "exit_code":0},
+    {"case":"mul", "tpu_p50_ms":2.126954, "tpu_p95_ms":2.948568, "cpu_p50_ms":1.107504, "max_code_difference":1, "exit_code":0},
+    {"case":"l2", "tpu_p50_ms":1.426433, "tpu_p95_ms":1.789510, "cpu_p50_ms":3.063721, "max_code_difference":1, "exit_code":0},
+    {"case":"decoder", "tpu_p50_ms":0.902384, "tpu_p95_ms":1.449015, "cpu_p50_ms":32.146810, "max_code_difference":1, "exit_code":0,
+     "tpu_compile_ms":263.505289, "tpu_first_ms":16.540974, "input_bytes":38400, "output_bytes":57600},
+    {"case":"decoder_l2", "tpu_p50_ms":1.239950, "tpu_p95_ms":1.470622, "cpu_p50_ms":34.087361, "max_code_difference":11, "exit_code":4,
+     "tpu_compile_ms":132.088501, "tpu_first_ms":7.733765, "components_above_two_codes":1056, "pixels_above_two_codes":732,
+     "cross_device_angle_max_degrees_not_quality":5.845943584174972, "cross_device_angle_p95_degrees_not_quality":1.094796053361893}
+  ],
+  "float32_cases": [
+    {"case":"conv", "tpu_supported":false, "cpu_p50_ms":1.774130},
+    {"case":"l2", "tpu_supported":false, "cpu_p50_ms":0.138916},
+    {"case":"div", "tpu_supported":false, "cpu_p50_ms":0.386637},
+    {"case":"decoder", "tpu_supported":false, "cpu_p50_ms":6.341634}
+  ],
+  "midas": {
+    "url":"https://github.com/isl-org/MiDaS/releases/download/v2_1/model_opt.tflite",
+    "license":"MIT (release repository LICENSE)",
+    "bytes":66338288,
+    "sha256":"93d871071edff1218973ce25ee27ce95ccd20450c70a55e1b89efa3f5a772cdd",
+    "input":{"shape":[1,256,256,3],"dtype":"FLOAT32","quantization_scale":[]},
+    "output":{"shape":[1,256,256,1],"dtype":"FLOAT32","quantization_scale":[]},
+    "tensor_types":{"FLOAT32":331,"INT32":5},
+    "tensors_with_quantization_scales":0,
+    "operators":[{"name":"CONV_2D","version":1,"count":73},{"name":"DEPTHWISE_CONV_2D","version":1,"count":24},{"name":"ADD","version":1,"count":27},{"name":"RELU","version":1,"count":7},{"name":"RESIZE_BILINEAR","version":3,"count":5}],
+    "inference_run":false
+  },
+  "nconv": {
+    "revision":"d85d4b659f2207b397c62d81f27f363baf3397be",
+    "checkpoint":"workspace/exp_unguided_depth/checkpoints/CNN_ep0003.pth.tar",
+    "license":"GPLv3 repository; no separate checkpoint-specific grant verified",
+    "bytes":12251,
+    "sha256":"27161a0a69d731e887ee1ce3894dec7794fd8a21178bbf2c49fc1a0dc0517f1c",
+    "deserialized":false,
+    "inference_run":false
+  }
+}

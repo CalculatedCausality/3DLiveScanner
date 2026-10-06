@@ -1,0 +1,88 @@
+// Production pose/origin methods plus the real measured-depth projection.
+// The oracle is a stationary metric plane observed from moving camera poses.
+#include <arcore/depth_measurement.h>
+#include <depth/frame_capture.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <cassert>
+#include <cstdio>
+#include <vector>
+
+namespace oc {
+struct ARCore {glm::mat4 zero_transform_{1};glm::mat4 GetZeroTransform();};
+struct ARCoreService {static std::vector<glm::mat4> GetPose(glm::mat4,glm::mat4);};
+// PRODUCTION_ORIGIN
+// PRODUCTION_POSE
+}
+
+int main() {
+    using namespace oc;
+    double maxPose=0,maxPlane=0,maxRoundTrip=0,oldFarPlaneBias=0,oldHybridPlaneError=0;
+    int observations=0;
+    ARCore ar;
+    for(int frame=0;frame<120;++frame) {
+        const glm::vec3 eye(1.5f*std::sin(frame*.07f),1.1f+.6f*std::cos(frame*.03f),.3f*std::sin(frame*.11f));
+        const glm::vec3 target(.4f*std::sin(frame*.05f),0,-1.5f-.02f*frame);
+        const glm::mat4 view=glm::lookAt(eye,target,glm::vec3(0,1,0));
+        const glm::mat4 camera=glm::inverse(view);
+        // Fixed-reference camera motion. SDK world rebasing and reference
+        // hand-off are covered separately by reference_test.cc.in.
+        assert(ar.GetZeroTransform()==glm::mat4(1));
+        for(float nearPlane:{.001f,.03f,.1f}) {
+            glm::mat4 projection=glm::perspective(glm::radians(65.f),.5625f,nearPlane,100.f);
+            projection[2][0]=.023f;projection[2][1]=-.015f;
+            auto poses=ARCoreService::GetPose(projection,view);
+            const glm::mat4 expected=camera*glm::rotate(glm::mat4(1),glm::radians(180.f),glm::vec3(1,0,0));
+            for(int col=0;col<4;++col)for(int row=0;row<4;++row)
+                maxPose=std::max(maxPose,double(std::abs(poses[0][col][row]-expected[col][row])));
+            geometry::DepthProjection mapper;assert(mapper.Configure(projection,view));
+            for(int y=-4;y<=4;++y)for(int x=-4;x<=4;++x) {
+                const glm::dvec2 uv(x*.16,y*.16);
+                const glm::dvec3 ray=mapper.Ray(uv);
+                if(ray.y>=-.1)continue;
+                const double depth=-mapper.origin.y/ray.y;
+                if(depth<=.051||depth>12)continue;
+                double measured=0;float confidence=0;
+                const uint16_t mm=uint16_t(std::round(depth*1000));
+                assert(geometry::MeasuredDepth(mm,230,128,measured,confidence));
+                auto world=mapper.Point(uv,measured);assert(geometry::Point(world));
+                world.w=confidence;
+                maxPlane=std::max(maxPlane,std::abs(double(world.y)));
+                const auto local=glm::inverse(glm::dmat4(poses[0]))*glm::dvec4(world.x,world.y,world.z,1);
+                maxRoundTrip=std::max(maxRoundTrip,std::abs(local.z-measured));
+                assert(confidence==230/255.f);
+                const auto exact=mapper.Point(uv,depth);
+                assert(std::abs(exact.y)<2e-6);
+                auto packet=std::make_shared<depth_test::Frame>();
+                depth_test::AddRayLink(packet,0,0,world,float(measured),.05f,ray);
+                assert(packet&&packet->links.size()==1);
+                const auto shifted=mapper.Point(uv,measured+.01);
+                for(int j=0;j<3;++j)assert(std::abs(shifted[j]-(world[j]+ray[j]*.01))<2e-6);
+                if(nearPlane==.001f) {
+                    auto inverse=glm::inverse(glm::dmat4(projection)*glm::dmat4(view));
+                    auto old=geometry::DepthPoint(inverse,uv,100-.001f,depth);
+                    oldFarPlaneBias=std::max(oldFarPlaneBias,std::abs(double(old.y)));
+                    // Reproduce the former <=3-voxel smoothed-depth replacement
+                    // and one-voxel depth offset, without making it an oracle.
+                    const double smooth=measured+.05*std::sin(frame*.21);
+                    assert(std::abs(smooth-measured)<.06);
+                    auto hybrid=geometry::DepthPoint(inverse,uv,100-.001f,smooth-.02);
+                    oldHybridPlaneError=std::max(oldHybridPlaneError,std::abs(double(hybrid.y)));
+                }
+                ++observations;
+            }
+        }
+    }
+    assert(observations>10000&&maxPose<2e-6&&maxPlane<.001&&maxRoundTrip<3e-6);
+    assert(oldHybridPlaneError>.02);
+    double metres=0;float weight=0;
+    assert(!geometry::MeasuredDepth(0,255,128,metres,weight));
+    assert(!geometry::MeasuredDepth(50,255,128,metres,weight));
+    assert(!geometry::MeasuredDepth(2000,128,128,metres,weight));
+    assert(geometry::MeasuredDepth(2000,129,128,metres,weight)&&metres==2&&weight==129/255.f);
+    geometry::DepthProjection invalid;
+    assert(!invalid.Configure(glm::mat4(0),glm::mat4(1)));
+    assert(!geometry::Point(invalid.Point(glm::dvec2(0),2)));
+    std::printf("PASS moving-plane observations=%d pose_error=%.9f measured_height_error_m=%.9f camera_depth_error_m=%.9f old_far_plane_bias_m=%.9f old_hybrid_height_error_m=%.9f\n",
+                observations,maxPose,maxPlane,maxRoundTrip,oldFarPlaneBias,oldHybridPlaneError);
+}
