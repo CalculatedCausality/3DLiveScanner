@@ -1,0 +1,225 @@
+// Host boundary fakes only. Production method bodies are inserted by run.py.
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <condition_variable>
+#include <cstdlib>
+#include <future>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <semaphore.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include <thread/capture_backoff.h>
+#define LOGE(...) ((void)0)
+
+namespace oc {
+enum Failure { NONE, RETURN_FALSE, THROW_ERROR, THROW_ALLOC };
+static Failure writeFailure = NONE, modelFailure = NONE;
+static int failWriteAt = 0, writeCount = 0, modelCount = 0;
+static bool failPreparation = false;
+static bool result(Failure failure) {
+    if (failure == THROW_ERROR) throw std::runtime_error("injected write error");
+    if (failure == THROW_ALLOC) throw std::bad_alloc();
+    return failure != RETURN_FALSE;
+}
+
+// Fake image storage/codec boundary; swap and row-flip bodies are production.
+struct Image {
+    int width = 2, height = 3;
+    std::vector<unsigned char> pixels;
+    unsigned char* data;
+    std::string name;
+    explicit Image(std::string value) : pixels(24), data(pixels.data()), name(value) {
+        for (unsigned i = 0; i < pixels.size(); ++i) pixels[i] = i;
+    }
+    std::string GetName() { return name; }
+    std::string GetExtension() {
+        if (failPreparation && name == "second.png") throw std::bad_alloc();
+        return name.substr(name.size() - 3);
+    }
+    // PRODUCTION_SWAP_NAME
+    void UpsideDown();
+    bool Write(std::string path) {
+        assert(path == name && path.find("export_") != std::string::npos);
+        ++writeCount;
+        // JPG's original bottom row must be at the top only while saving.
+        assert(pixels[0] == (writeCount == 1 ? 16 : 0));
+        return result(writeCount == failWriteAt ? writeFailure : NONE);
+    }
+};
+struct Mesh { Image* image; bool imageOwner; };
+struct Scene { std::vector<Mesh> static_meshes_; };
+struct Dataset {};
+struct Texturize {};
+
+// Fake SDK replay boundary with a deterministic held-binder interval.
+struct Scan {
+    bool failed = true, recovered = true, storage = false, cancel = false;
+    std::promise<void> entered;
+    std::shared_future<void> release;
+    bool UpdateFailed() { return failed; }
+    bool RecoverContext(Dataset*, Texturize&, int, bool& storageFailure,
+                        const std::atomic<bool>& requestedRunning, bool& cancelled) {
+        entered.set_value();
+        release.wait();
+        storageFailure = storage;
+        cancelled = cancel;
+        if (cancelled) assert(!requestedRunning.load());
+        if (recovered) failed = false;
+        return recovered;
+    }
+};
+struct Reconstruction {
+    sem_t binder_semaphore_;
+    std::mutex render_mutex_, event_mutex_;
+    std::atomic<bool> t3dr_is_running_{false}, photo_mode{false}, history_failed{false};
+    std::atomic<int> recovery_state{0};
+    CaptureBackoff capture_backoff;
+    std::string event_;
+    bool request_newprojection = false;
+    int committed_frames = 3;
+    Dataset* dataset = nullptr;
+    Texturize texturize;
+    Scene scene;
+    Scan scan;
+    Reconstruction() { assert(sem_init(&binder_semaphore_, 0, 1) == 0); }
+    ~Reconstruction() { sem_destroy(&binder_semaphore_); }
+    void BinderLock();
+    bool BinderTryLock();
+    bool TryLockFrame(bool&, bool);
+    void BinderUnlock();
+    void SetPhotoMode(bool);
+    bool RecoverScan();
+};
+struct App {
+    Reconstruction reconstruction;
+    void OnToggleButtonClicked(bool);
+    int GetRecoveryState() const;
+    bool SaveWithTextures(std::string);
+};
+
+// Fake model writer checks that names stay staged through model serialization.
+struct File3d {
+    File3d(std::string, bool) {}
+    bool WriteModel(std::vector<Mesh>& meshes) {
+        ++modelCount;
+        assert(meshes[0].image->name == "export_0.png");
+        assert(meshes[1].image->name == "export_1.png");
+        return result(modelFailure);
+    }
+};
+
+// PRODUCTION_DEFINITIONS
+
+static void controls(bool recovered, bool storage, bool cancelled = false) {
+    App app;
+    auto& owner = app.reconstruction;
+    owner.scan.recovered = recovered;
+    owner.scan.storage = storage;
+    owner.scan.cancel = cancelled;
+    std::promise<void> release;
+    owner.scan.release = release.get_future().share();
+    auto entered = owner.scan.entered.get_future();
+    app.OnToggleButtonClicked(true);
+    owner.BinderLock();
+    std::thread worker([&] {
+        assert(owner.RecoverScan() == recovered);
+        owner.BinderUnlock();
+    });
+    assert(entered.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+    assert(app.GetRecoveryState() == 1);
+    auto command = std::async(std::launch::async, [&] {
+        app.OnToggleButtonClicked(false);
+        owner.SetPhotoMode(true);
+    });
+    // A regression that reacquires the held binder fails rather than hanging.
+    assert(command.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready);
+    command.get();
+    assert(!owner.t3dr_is_running_.load() && owner.photo_mode.load());
+    assert(!owner.BinderTryLock());
+    release.set_value();
+    worker.join();
+    assert(!owner.t3dr_is_running_.load());
+    assert(app.GetRecoveryState() == (recovered || storage || cancelled ? 0 : 2));
+    assert(owner.history_failed.load() == (!recovered && storage));
+    if (cancelled) assert(owner.scan.failed); // Resume must replay, not trust a partial volume.
+    assert(owner.BinderTryLock());
+    owner.BinderUnlock();
+    if (!recovered && !storage) {
+        app.OnToggleButtonClicked(true);
+        assert(owner.t3dr_is_running_.load() && app.GetRecoveryState() == 0);
+        assert(owner.event_.empty());
+    }
+}
+
+static void frameAdmission() {
+    App app;
+    auto& owner = app.reconstruction;
+    bool running = true;
+    owner.t3dr_is_running_ = true;
+    owner.capture_backoff.Rejected(CaptureBackoff::NowMs() + 1000000);
+    assert(!owner.TryLockFrame(running, false));
+    assert(owner.BinderTryLock()); // Rejection must release the admission lock.
+    owner.BinderUnlock();
+    owner.t3dr_is_running_ = false;
+    assert(owner.TryLockFrame(running, false) && !running); // Offline/paused GL work.
+    owner.BinderUnlock();
+    owner.t3dr_is_running_ = true;
+    assert(owner.TryLockFrame(running, true) && running); // Face path has no volume.
+    owner.BinderUnlock();
+    owner.recovery_state = 3;
+    app.OnToggleButtonClicked(true);
+    assert(owner.recovery_state.load() == 0 && owner.capture_backoff.Ready());
+    assert(owner.TryLockFrame(running, false) && running);
+    owner.BinderUnlock();
+    owner.BinderLock();
+    assert(!owner.TryLockFrame(running, false));
+    owner.BinderUnlock();
+}
+
+static void save(Failure textureFailure, int failAt, Failure model, bool prepare = false) {
+    App app;
+    Image jpg("first.jpg"), png("second.png");
+    const auto originalJpg = jpg.pixels, originalPng = png.pixels;
+    unsigned char* jpgAddress = jpg.data;
+    app.reconstruction.scene.static_meshes_ = {{&jpg, true}, {&png, true}, {&jpg, false}};
+    writeFailure = textureFailure;
+    failWriteAt = failAt;
+    modelFailure = model;
+    failPreparation = prepare;
+    writeCount = modelCount = 0;
+    const bool expected = textureFailure == NONE && model == NONE && !prepare;
+    assert(app.SaveWithTextures("export.obj") == expected);
+    assert(jpg.name == "first.jpg" && png.name == "second.png");
+    assert(jpg.pixels == originalJpg && png.pixels == originalPng && jpg.data == jpgAddress);
+    assert(app.reconstruction.BinderTryLock());
+    app.reconstruction.BinderUnlock();
+    assert(app.reconstruction.render_mutex_.try_lock());
+    app.reconstruction.render_mutex_.unlock();
+    if (expected) assert(writeCount == 2 && modelCount == 1);
+    failPreparation = false;
+}
+}
+
+int main() {
+    using namespace oc;
+    frameAdmission();
+    controls(true, false);
+    controls(false, false);
+    controls(false, true);
+    controls(false, false, true);
+    save(NONE, 0, NONE);
+    for (Failure f : {RETURN_FALSE, THROW_ERROR, THROW_ALLOC}) {
+        save(f, 1, NONE);
+        save(f, 2, NONE);
+        save(NONE, 0, f);
+    }
+    save(NONE, 0, NONE, true);
+    std::cout << "PASS: extracted production controls during held-binder replay; recovery/cancellation states; "
+                 "11 save success/failure/exception cases restore names, pixels, and locks\n";
+}

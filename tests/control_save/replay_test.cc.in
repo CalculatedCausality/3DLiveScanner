@@ -1,0 +1,111 @@
+// The production replay definition runs against valid synthetic dataset/image
+// inputs and an instrumented SDK boundary. No device SDK or codec is emulated.
+#include <atomic>
+#include <cassert>
+#include <cmath>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <tango/paging_policy.h>
+namespace glm { struct mat4 {}; }
+using Tango3DR_ReconstructionContext = int*;
+struct Tango3DR_CameraCalibration { int width, height; double cx, cy, fx, fy; };
+struct Tango3DR_Pose {};
+struct Tango3DR_PointCloud { double timestamp = 1; };
+struct Tango3DR_ImageBuffer { int width, height, stride, format; double timestamp; unsigned char* data; };
+struct Tango3DR_GridIndexArray {};
+const int TANGO_3DR_SUCCESS = 0, TANGO_3DR_HAL_PIXEL_FORMAT_YCrCb_420_SP = 1;
+static std::atomic<bool> requested{true};
+static int updates, destroyed, clouds, grids, pauseAfter;
+static bool sdkFails;
+static Tango3DR_ReconstructionContext CreateContext(double, double, double, int, bool,
+        const std::string& directory, const oc::PagingPlan& plan) {
+    assert(directory == "owned-cache" && plan.enabled);
+    assert(plan.resident_bytes == 96u * 1024u * 1024u);
+    assert(plan.logical_chunks == 7680); // Replay retains the configured plan.
+    return new int(1);
+}
+static void Tango3DR_ReconstructionContext_destroy(Tango3DR_ReconstructionContext context) { ++destroyed; delete context; }
+static int Tango3DR_ReconstructionContext_setColorCalibration(Tango3DR_ReconstructionContext, Tango3DR_CameraCalibration*) { return 0; }
+static void Tango3DR_PointCloud_destroy(Tango3DR_PointCloud*) { ++clouds; }
+static void Tango3DR_GridIndexArray_destroy(Tango3DR_GridIndexArray*) { ++grids; }
+static int Tango3DR_updateFromPointCloud(Tango3DR_ReconstructionContext, Tango3DR_PointCloud*, Tango3DR_Pose*,
+                                        Tango3DR_ImageBuffer*, Tango3DR_Pose*, Tango3DR_GridIndexArray*) {
+    ++updates;
+    if (updates == pauseAfter) requested.store(false);
+    return sdkFails ? -1 : 0;
+}
+namespace oc {
+const int COLOR_CAMERA = 0;
+namespace geometry {
+bool RigidPose(const glm::mat4&) { return true; }
+bool Cloud(Tango3DR_PointCloud*) { return true; }
+}
+struct Dataset {
+    void ReadState(int& count, int& width, int& height, double& cx, double& cy, double& fx, double& fy) {
+        count = 3; width = height = 6; cx = cy = 3; fx = fy = 4;
+    }
+    std::vector<float> ReadDistortion() { return {}; }
+    bool ReadPose(int, std::vector<glm::mat4>& output) { output.resize(3); return true; }
+    Tango3DR_PointCloud ReadPointCloud(int) { return {}; }
+    std::string GetFileName(int, const char*) { return "frame.jpg"; }
+};
+struct TangoTexturize {
+    void ApplyDistortion(Tango3DR_CameraCalibration&, std::vector<float>&) {}
+    Tango3DR_Pose Extract3DRPose(const glm::mat4&) { return {}; }
+};
+struct Image {
+    Image(const std::string&) {}
+    bool IsValid() { return true; }
+    int GetWidth() { return 6; }
+    int GetHeight() { return 6; }
+    unsigned char* ExtractYUVDownscaled(int) { return new unsigned char[1]; }
+};
+struct TangoScan {
+    struct CalibrationBoundary { void Reset() {} } color_calibration;
+    bool update_failed = true;
+    double res_ = .01, dmin_ = .1, dmax_ = 7;
+    int noise_ = 1;
+    bool clearing_ = true;
+    std::string paging_directory_ = "owned-cache";
+    PagingPlan paging_plan_ = PlanPaging(.02, uint64_t(16) << 30, uint64_t(8) << 30);
+    Tango3DR_ReconstructionContext context = new int(0);
+    ~TangoScan() { if (context) Tango3DR_ReconstructionContext_destroy(context); }
+    bool RecoverContext(Dataset*, TangoTexturize&, int, bool&, const std::atomic<bool>&, bool&);
+};
+// PRODUCTION_REPLAY
+}
+int main() {
+    oc::Dataset dataset;
+    oc::TangoTexturize texturize;
+    {
+        oc::TangoScan scan;
+        bool storage = true, cancelled = false;
+        requested.store(false);
+        auto original = scan.context;
+        assert(!scan.RecoverContext(&dataset, texturize, 3, storage, requested, cancelled));
+        assert(cancelled && !storage && updates == 0 && scan.context == original && scan.update_failed);
+    }
+    updates = destroyed = clouds = grids = 0;
+    {
+        oc::TangoScan scan;
+        bool storage = false, cancelled = false;
+        requested.store(true); pauseAfter = 1;
+        assert(!scan.RecoverContext(&dataset, texturize, 3, storage, requested, cancelled));
+        assert(cancelled && !storage && updates == 1 && clouds == 1 && grids == 1);
+        assert(destroyed == 2 && scan.context == nullptr && scan.update_failed);
+        requested.store(true); pauseAfter = 0;
+        assert(scan.RecoverContext(&dataset, texturize, 3, storage, requested, cancelled));
+        assert(!cancelled && !storage && updates == 4 && scan.context && !scan.update_failed);
+    }
+    {
+        oc::TangoScan scan;
+        bool storage = false, cancelled = false;
+        assert(!scan.RecoverContext(&dataset, texturize, 4, storage, requested, cancelled));
+        assert(storage && !cancelled && scan.update_failed);
+        sdkFails = true;
+        assert(!scan.RecoverContext(&dataset, texturize, 3, storage, requested, cancelled));
+        assert(!storage && !cancelled && scan.context == nullptr && scan.update_failed);
+    }
+    std::cout << "PASS: production replay cancels between SDK frames, releases partial context, resumes full history, and distinguishes failures\n";
+}

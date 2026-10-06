@@ -1,0 +1,37 @@
+plugins { id 'com.android.application' version '8.1.1' }
+
+def repo = file('../../..')
+buildDir = System.getenv('SHARING_TEST_BUILD_DIR') ?: '/tmp/opencode/scanner-sharing-android-build'
+android {
+    namespace 'com.lvonasek.arcore3dscanner'
+    compileSdk 33
+    defaultConfig {
+        applicationId 'com.lvonasek.arcore3dscanner'
+        minSdk 24
+        targetSdk 33
+    }
+    buildFeatures { buildConfig true }
+    lint { checkOnly 'NewApi' }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ["${repo}/scanner/app/src/main/java/com/lvonasek/arcore3dscanner/sharing"]
+            res.srcDirs = ["${repo}/scanner/app/src/main/res"]
+        }
+        test.java.srcDirs = ['src']
+    }
+    testOptions {
+        unitTests.includeAndroidResources = true
+        // Android 33's ParcelFileDescriptor shadow needs this boundary on JDK 17.
+        unitTests.all { jvmArgs '--add-opens=java.base/java.io=ALL-UNNAMED' }
+    }
+}
+dependencies {
+    implementation 'com.google.android.material:material:1.9.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.12.2'
+}
