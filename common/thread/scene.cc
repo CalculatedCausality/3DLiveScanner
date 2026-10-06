@@ -4,8 +4,12 @@
 namespace oc {
 
     Scene::Scene() : color_vertex_shader(0),
-                     showNormals(false),
-                     projectTexture(-1),
+                      depth_shader(0),
+                      mixed_shader(0),
+                      showNormals(false),
+                      projectDepth(-1),
+                      projectTexture(-1),
+                      renderer(0),
                      lastGrid(0),
                      textured_shader(0),
                      uniform(0) {
@@ -20,12 +24,75 @@ namespace oc {
             delete color_vertex_shader;
         if (mixed_shader)
             delete mixed_shader;
+        if (depth_shader)
+            delete depth_shader;
         if (textured_shader)
             delete textured_shader;
+        if (renderer)
+            delete renderer;
+    }
+
+    void Scene::AbandonGlContext() {
+        Image::AbandonTextures();
+        if (color_vertex_shader) {
+            color_vertex_shader->AbandonGlContext();
+            delete color_vertex_shader;
+            color_vertex_shader = 0;
+        }
+        if (depth_shader) {
+            depth_shader->AbandonGlContext();
+            delete depth_shader;
+            depth_shader = 0;
+        }
+        if (mixed_shader) {
+            mixed_shader->AbandonGlContext();
+            delete mixed_shader;
+            mixed_shader = 0;
+        }
+        if (textured_shader) {
+            textured_shader->AbandonGlContext();
+            delete textured_shader;
+            textured_shader = 0;
+        }
+        if (renderer) {
+            renderer->AbandonGlContext();
+            delete renderer;
+            renderer = 0;
+        }
+        projectDepth = -1;
+        projectTexture = -1;
+        for (Mesh& mesh : static_meshes_)
+            if (mesh.image) mesh.image->SetTexture(-1);
     }
 
     void Scene::SetupViewPort(int w, int h) {
         glViewport(0, 0, w, h);
+        if (renderer) delete renderer;
+        if (color_vertex_shader) delete color_vertex_shader;
+        if (depth_shader) delete depth_shader;
+        if (mixed_shader) delete mixed_shader;
+        if (textured_shader) delete textured_shader;
+        color_vertex_shader = 0;
+        depth_shader = 0;
+        mixed_shader = 0;
+        textured_shader = 0;
+        if (projectDepth >= 0) {
+            GLuint texture = (GLuint) projectDepth;
+            glDeleteTextures(1, &texture);
+        }
+        if (projectTexture >= 0) {
+            GLuint texture = (GLuint) projectTexture;
+            glDeleteTextures(1, &texture);
+        }
+        projectDepth = -1;
+        projectTexture = -1;
+        for (Mesh& mesh : static_meshes_) {
+            if (mesh.image && (mesh.image->GetTexture() >= 0)) {
+                GLuint texture = (GLuint) mesh.image->GetTexture();
+                glDeleteTextures(1, &texture);
+                mesh.image->SetTexture(-1);
+            }
+        }
         renderer = new GLRenderer();
         renderer->Init(w, h, w, h);
     }
@@ -61,17 +128,24 @@ namespace oc {
             textured_shader = new GLSL(vertex, fragment);
 
         long lastTexture = INT_MAX;
+        bool colorPrepared = false;
+        bool texturedPrepared = false;
         for (Mesh& mesh : static_meshes_) {
+            if (mesh.vertices.empty()) continue;
             if (mesh.image && (mesh.image->GetTexture() == -1))
                 mesh.image->SetTexture((long) GLSL::Image2GLTexture(mesh.image));
             if (!mesh.image || (mesh.image->GetTexture() == -1)) {
                 if (color_vertex_shader) {
-                    glm::vec3 p = renderer->camera.position;
                     color_vertex_shader->Bind();
-                    color_vertex_shader->UniformFloat("u_uniformBegin", 65536);
-                    color_vertex_shader->UniformFloat("u_uniformFactor", 1);
-                    color_vertex_shader->UniformVec3("u_uniformCamera", p.x, p.y, p.z);
-                    renderer->Render(&mesh.vertices[0].x, &mesh.vertices[0].x, 0, mesh.colors.data(), mesh.vertices.size(), 0, GL_POINTS);
+                    if (!colorPrepared) {
+                        glm::vec3 p = renderer->camera.position;
+                        color_vertex_shader->UniformFloat("u_uniformBegin", 65536);
+                        color_vertex_shader->UniformFloat("u_uniformFactor", 1);
+                        color_vertex_shader->UniformVec3("u_uniformCamera", p.x, p.y, p.z);
+                        renderer->PrepareRender();
+                        colorPrepared = true;
+                    }
+                    renderer->RenderPrepared(&mesh.vertices[0].x, &mesh.vertices[0].x, 0, mesh.colors.data(), mesh.vertices.size(), 0, GL_POINTS);
                 }
             } else {
                 glActiveTexture(GL_TEXTURE2);
@@ -81,13 +155,13 @@ namespace oc {
                 }
                 if (textured_shader) {
                     textured_shader->Bind();
-                    textured_shader->UniformInt("u_texture", 2);
-                    textured_shader->UniformFloat("u_uniformNormals", 0);
-
-                    int size = mesh.vertices.size();
-                    GLSL::CurrentShader()->UniformMatrix("MVP", glm::value_ptr(matrix));
-                    GLSL::CurrentShader()->Attrib(&mesh.vertices[0].x, &mesh.normals[0].x, &mesh.uv[0].s, mesh.colors.data());
-                    if (size > 0) glDrawArrays(GL_TRIANGLES, 0, (GLsizei) size);
+                    if (!texturedPrepared) {
+                        textured_shader->UniformInt("u_texture", 2);
+                        textured_shader->UniformFloat("u_uniformNormals", 0);
+                        textured_shader->UniformMatrix("MVP", glm::value_ptr(matrix));
+                        texturedPrepared = true;
+                    }
+                    renderer->RenderPrepared(&mesh.vertices[0].x, &mesh.normals[0].x, &mesh.uv[0].s, mesh.colors.data(), mesh.vertices.size());
                 }
                 glActiveTexture(GL_TEXTURE0);
             }
@@ -110,13 +184,20 @@ namespace oc {
             textured_shader = new GLSL(vertex, fragment);
 
         long lastTexture = INT_MAX;
+        bool colorPrepared = false;
+        bool texturedPrepared = false;
         for (Mesh& mesh : static_meshes_) {
+            if (mesh.vertices.empty()) continue;
             if (mesh.image && (mesh.image->GetTexture() == -1))
                 mesh.image->SetTexture((long) GLSL::Image2GLTexture(mesh.image));
             if (!mesh.image || (mesh.image->GetTexture() == -1)) {
                 if (color_vertex_shader) {
                     color_vertex_shader->Bind();
-                    renderer->Render(&mesh.vertices[0].x, &mesh.vertices[0].x, 0, mesh.colors.data(), mesh.vertices.size(), 0, GL_POINTS);
+                    if (!colorPrepared) {
+                        renderer->PrepareRender();
+                        colorPrepared = true;
+                    }
+                    renderer->RenderPrepared(&mesh.vertices[0].x, &mesh.vertices[0].x, 0, mesh.colors.data(), mesh.vertices.size(), 0, GL_POINTS);
                 }
             } else {
                 glActiveTexture(GL_TEXTURE2);
@@ -126,12 +207,18 @@ namespace oc {
                 }
                 if (textured_shader) {
                     textured_shader->Bind();
-                    textured_shader->UniformInt("u_texture", 2);
-                    textured_shader->UniformFloat("u_uniform", uniform);
-                    textured_shader->UniformFloat("u_uniformNormals", showNormals ? 1 : 0);
-                    textured_shader->UniformFloat("u_uniformPitch", uniformPitch);
-                    textured_shader->UniformVec3("u_uniformPos", uniformPos.x, uniformPos.y, uniformPos.z);
-                    renderer->Render(&mesh.vertices[0].x, &mesh.normals[0].x, &mesh.uv[0].s, mesh.colors.data(), mesh.vertices.size());
+                    if (!texturedPrepared) {
+                        // These values are shared by the whole pass, including
+                        // when point meshes switch the active shader in between.
+                        textured_shader->UniformInt("u_texture", 2);
+                        textured_shader->UniformFloat("u_uniform", uniform);
+                        textured_shader->UniformFloat("u_uniformNormals", showNormals ? 1 : 0);
+                        textured_shader->UniformFloat("u_uniformPitch", uniformPitch);
+                        textured_shader->UniformVec3("u_uniformPos", uniformPos.x, uniformPos.y, uniformPos.z);
+                        renderer->PrepareRender();
+                        texturedPrepared = true;
+                    }
+                    renderer->RenderPrepared(&mesh.vertices[0].x, &mesh.normals[0].x, &mesh.uv[0].s, mesh.colors.data(), mesh.vertices.size());
                 }
                 glActiveTexture(GL_TEXTURE0);
             }

@@ -16,7 +16,7 @@ namespace oc {
         float GetFloorLevel(glm::vec3 pos);
         void MirrorZ();
         void Normals2Color();
-        void Reindex();
+        bool Reindex();
         void SwapYZ();
         static glm::vec3 Key2Vector(std::string a);
         static std::string Vector2key(glm::vec3 a);

@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.0.2)
 
-find_library(glut-lib glut)
-find_library(GL-lib GL)
-find_library(turbojpeg-lib turbojpeg)
-find_library(png-lib png)
-find_library(X11-lib X11)
+include(../common/sources.cmake)
 
 include_directories(
     ../common
@@ -13,11 +9,8 @@ include_directories(
 
 add_executable(
     dataset_viewer
-    ../common/data/dataset.cc
-    ../common/data/file3d.cc
-    ../common/data/image.cc
-    ../common/data/mesh.cc
-    ../common/gl/glsl.cc
+    ${SCANNER_DATA_SOURCES}
+    ${SCANNER_VIEWER_SOURCES}
     app.cpp
 )
 

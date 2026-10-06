@@ -17,11 +17,15 @@ PROJECT_ROOT:= $(LOCAL_PATH)/..
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := arcore
-LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
+LOCAL_EXPORT_C_INCLUDES := $(if $(ARCORE_INCLUDE_DIR),$(ARCORE_INCLUDE_DIR),$(LOCAL_PATH)/include)
+ifneq ($(ARCORE_LIB_DIR),)
+LOCAL_SRC_FILES := $(ARCORE_LIB_DIR)/$(TARGET_ARCH_ABI)/libarcore_sdk_c.so
+else
 ifneq ($(filter $(TARGET_ARCH_ABI), armeabi-v7a armeabi-v7a-hard),)
 LOCAL_SRC_FILES := jni/armeabi-v7a/libarcore_sdk_c.so
 else ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
 LOCAL_SRC_FILES := jni/arm64-v8a/libarcore_sdk_c.so
+endif
 endif
 
 include $(PREBUILT_SHARED_LIBRARY)

@@ -1,11 +1,12 @@
 #include "tango/retango.h"
+#include <arcore/geometry_validation.h>
 
 #include <ctime>
 #include <delaunay.h>
 
 namespace oc {
 
-    Retango::Retango() : finished(0), mask(0), rgb(0) {
+    Retango::Retango() : convertedReady(false), convertedPose(1.0f), finished(0), mask(0), rgb(0) {
         minDff = 0.1f;
         maxDst = 0.25f;
         resolution = 0.04f;
@@ -16,6 +17,7 @@ namespace oc {
         filling = 0;
         masking = 0;
         pairing = 0;
+        triangling = 0;
         walling = 0;
     }
 
@@ -32,29 +34,30 @@ namespace oc {
             return;
 
         clock_t step0 = clock();
-        Component longest;
         std::sort(components.begin(), components.end(), Comparator());
-        longest = components[0];
+        Component& longest = components[0];
         if (!longest.valid)
             return;
 
         //estimate walls
         clock_t step1 = clock();
-        bool inc = false;
-        float last = 99999;
         std::vector<glm::vec4> top[2];
-        for (int i = 0; i < 2; i++) {
-            for (Edge& e : longest.edges) {
-                if (last < e.point[0].y) {
-                    if (inc)
-                        top[0].push_back(e.point[0]);
-                    inc = true;
-                } else {
-                    if (inc)
-                        top[1].push_back(e.point[0]);
-                    inc = false;
+        if (extraEstimators) {
+            bool inc = false;
+            float last = 99999;
+            for (int i = 0; i < 2; i++) {
+                for (Edge& e : longest.edges) {
+                    if (last < e.point[0].y) {
+                        if (inc)
+                            top[0].push_back(e.point[0]);
+                        inc = true;
+                    } else {
+                        if (inc)
+                            top[1].push_back(e.point[0]);
+                        inc = false;
+                    }
+                    last = e.point[0].y;
                 }
-                last = e.point[0].y;
             }
         }
 
@@ -130,21 +133,33 @@ namespace oc {
     }
 
     void Retango::ADD(std::vector<glm::vec4>& p, glm::mat4 pose, Image* img) {
-        glm::mat4 world2camera = glm::inverse(pose);
         input.clear();
+        converted.clear();
+        convertedReady = false;
         merged.clear();
         output.clear();
+        if (!geometry::RigidPose(pose) || !img || !img->IsValid()) return;
+        glm::mat4 world2camera = glm::inverse(pose);
+        input.reserve(p.size());
+        merged.reserve(p.size() + estimated.size());
+        output.reserve(p.size() + estimated.size());
         for (glm::vec4& v : p) {
+            if (!geometry::Point(v)) continue;
+            glm::vec4 point = world2camera * glm::vec4(v.x, v.y, v.z, 1.0f);
+            point.w = v.w;
+            if (!geometry::CameraPoint(point, img->GetWidth(), img->GetHeight())) continue;
             input.emplace_back(v.x, v.y, v.z);
             merged.push_back(v);
-            glm::vec4 point = world2camera * glm::vec4(v.x, v.y, v.z, 1.0f);
-            point.w = v.w;
             output.push_back(point);
         }
+        // Estimates from the preceding frame alone must not create a new update.
+        if (input.empty()) return;
         for (glm::vec4& v : estimated) {
-            merged.push_back(v);
+            if (!geometry::Point(v)) continue;
             glm::vec4 point = world2camera * glm::vec4(v.x, v.y, v.z, 1.0f);
             point.w = v.w;
+            if (!geometry::CameraPoint(point, img->GetWidth(), img->GetHeight())) continue;
+            merged.push_back(v);
             output.push_back(point);
         }
         UpdateCaches(img, pose);
@@ -191,7 +206,11 @@ namespace oc {
     Tango3DR_PointCloud* Retango::PCL(double timestamp) {
 #ifdef ANDROID
         Tango3DR_PointCloud* cloud = new Tango3DR_PointCloud();
-        Tango3DR_PointCloud_init(output.size(), cloud);
+        if (Tango3DR_PointCloud_init(output.size(), cloud) != TANGO_3DR_SUCCESS) {
+            Tango3DR_PointCloud_destroy(cloud);
+            delete cloud;
+            return nullptr;
+        }
         for (unsigned int i = 0; i < output.size(); i++) {
             cloud->points[i][0] = output[i].x;
             cloud->points[i][1] = output[i].y;
@@ -215,6 +234,8 @@ namespace oc {
         clock_t step1 = clock();
         UpdateMasked(pose);
         clock_t step2 = clock();
+        // Pair and wall estimators alone need this projection. Dense depth skips UPD.
+        UpdateConvertedCache();
         UpdatePairEstimation(pose);
         clock_t step3 = clock();
         if (extraEstimators) UpdateWallEstimation(pose);
@@ -229,6 +250,7 @@ namespace oc {
 
     void Retango::AddLine(glm::vec3 v, glm::vec3 t, glm::mat4& world2camera) {
         float len = glm::length(t - v);
+        if (!std::isfinite(len) || len <= 0 || !std::isfinite(resolution) || resolution <= 0) return;
         glm::vec3 dir = glm::normalize(t - v);
         for (float f = resolution; f <= len - resolution; f += resolution) {
             AddVoxel(glm::vec4(v + dir * f, 1.0f), world2camera);
@@ -286,9 +308,10 @@ namespace oc {
         //convert into mask coordinate system
         glm::vec4 v = glm::vec4(i.x, i.y, i.z, 1.0f);
         v = world2camera * v;
+        if (!geometry::CameraPoint(v, width, height) || !finished) return;
         v /= fabs(v.z * v.w);
-        int x = (int) ((0.5f + 0.5f * v.x) * (width - 1));
-        int y = (int) ((0.5f + 0.5f * v.y) * (height - 1));
+        int x, y;
+        if (!geometry::MaskCoordinates(v, width, height, x, y)) return;
         if ((x < 0) || (y < 0) || (x >= width) || (y >= height))
             return;
 
@@ -307,7 +330,7 @@ namespace oc {
         bool valid = true;
         if (!rgb) valid = false;
         else if (mem < 0) valid = false;
-        else if (mem - 3 >= size) valid = false;
+        else if (mem > size - 3) valid = false;
 
         if (valid) {
             output.r = rgb->GetData()[mem + 0];
@@ -323,10 +346,9 @@ namespace oc {
     bool Retango::IsMasked(glm::vec4 v, glm::vec4 t) {
 
         //RGB frame test
-        int x1 = (int) ((0.5f + 0.5f * v.x) * (width - 1));
-        int y1 = (int) ((0.5f + 0.5f * v.y) * (height - 1));
-        int x2 = (int) ((0.5f + 0.5f * t.x) * (width - 1));
-        int y2 = (int) ((0.5f + 0.5f * t.y) * (height - 1));
+        int x1, y1, x2, y2;
+        if (!geometry::MaskCoordinates(v, width, height, x1, y1) ||
+            !geometry::MaskCoordinates(t, width, height, x2, y2)) return true;
         if (!LineTest(x1, y1, x2, y2))
             return true;
 
@@ -509,7 +531,6 @@ namespace oc {
         }
 
         //clear all caches
-        converted.clear();
         estimated.clear();
         for (unsigned int i = 0; i < width * height; i++) {
             finished[i] = false;
@@ -517,9 +538,16 @@ namespace oc {
         }
         rgb = img;
         size = width * height * 4;
+        // Keep the ADD pose: UPD may use a different pose for its other estimators.
+        convertedPose = pose;
+    }
+
+    void Retango::UpdateConvertedCache() {
+        if (convertedReady || input.empty()) return;
 
         //create points in mask coordinates
-        glm::mat4 world2camera = glm::inverse(pose);
+        glm::mat4 world2camera = glm::inverse(convertedPose);
+        converted.reserve(input.size());
         for (glm::vec3& i : input) {
             glm::vec4 v = glm::vec4(i, 1.0f);
             v = world2camera * v;
@@ -527,6 +555,7 @@ namespace oc {
             v.y /= fabs(v.z * v.w);
             converted.push_back(v);
         }
+        convertedReady = true;
     }
 
     void Retango::UpdateDelaunayEstimation(glm::mat4& pose) {
@@ -555,9 +584,10 @@ namespace oc {
         for (glm::vec4& i : estimated) {
             glm::vec4 v = glm::vec4(i.x, i.y, i.z, 1.0f);
             v = world2camera * v;
+            if (!geometry::CameraPoint(v, width, height)) continue;
             v /= fabs(v.z * v.w);
-            int x = (int) ((0.5f + 0.5f * v.x) * (width - 1));
-            int y = (int) ((0.5f + 0.5f * v.y) * (height - 1));
+            int x, y;
+            if (!geometry::MaskCoordinates(v, width, height, x, y)) continue;
             for (int k = glm::max(x - s, 0); k <= glm::min(x + s, width - 1); k++)
                 for (int l = glm::max(y - s, 0); l <= glm::min(y + s, height - 1); l++)
                     mask[l * width + k] = true;
@@ -565,9 +595,10 @@ namespace oc {
         for (glm::vec3& i : input) {
             glm::vec4 v = glm::vec4(i, 1.0f);
             v = world2camera * v;
+            if (!geometry::CameraPoint(v, width, height)) continue;
             v /= fabs(v.z * v.w);
-            int x = (int) ((0.5f + 0.5f * v.x) * (width - 1));
-            int y = (int) ((0.5f + 0.5f * v.y) * (height - 1));
+            int x, y;
+            if (!geometry::MaskCoordinates(v, width, height, x, y)) continue;
             for (int k = glm::max(x - s, 0); k <= glm::min(x + s, width - 1); k++)
                 for (int l = glm::max(y - s, 0); l <= glm::min(y + s, height - 1); l++)
                     mask[l * width + k] = true;

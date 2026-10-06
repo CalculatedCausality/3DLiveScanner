@@ -22,6 +22,7 @@ namespace oc {
          * @brief destructor
          */
         ~GLRenderer();
+        void AbandonGlContext();
 
         /**
          * @brief Init inits renderer
@@ -60,6 +61,9 @@ namespace oc {
          */
         void Render(float* vertices, float* normals, float* uv, unsigned int* colors,
                     unsigned long size, unsigned int* indices = 0, int type = GL_TRIANGLES);
+        void PrepareRender();
+        void RenderPrepared(float* vertices, float* normals, float* uv, unsigned int* colors,
+                            unsigned long size, unsigned int* indices = 0, int type = GL_TRIANGLES);
 
         /**
          * @brief Rtt enables rendering into FBO which makes posible to do reflections
@@ -77,9 +81,10 @@ namespace oc {
         void Cleanup();
 
         GLSL* scene;                          ///< Scene shader
-        unsigned int* rendertexture;          ///< Texture for color buffer
-        unsigned int* fboID;                  ///< Frame buffer object id
-        unsigned int* rboID;                  ///< Render buffer object id
+        unsigned int rendertexture;          ///< Texture for color buffer
+        unsigned int fboID;                   ///< Frame buffer object id
+        unsigned int rboID;                   ///< Render buffer object id
+        bool ownsBuffers;                    ///< Ownership is independent of GL handle values
     };
 }
 

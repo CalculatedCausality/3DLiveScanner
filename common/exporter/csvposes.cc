@@ -4,7 +4,7 @@
 namespace oc {
 
 void ExporterCSVPoses::Process(Dataset* dataset, std::string output, bool rotated)
-{    
+{
     //init dataset
     int poseCount = GetPoseCount(dataset);
     float yaw = glm::radians(dataset->ReadYaw());

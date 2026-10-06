@@ -41,19 +41,23 @@ namespace oc {
         Dataset(std::string path);
         std::string GetFileName(int index, std::string extension);
         std::string GetPath() { return dataset; }
+        bool ValidateCommittedFrames();
 
         std::vector<float> ReadDistortion();
         Tango3DR_PointCloud ReadPointCloud(int index);
         std::vector<glm::mat4> ReadPose(int index);
-        std::vector<std::pair<GridIndex, Tango3DR_Mesh*> > ReadPreview(int index, bool empty);
+        bool ReadPose(int index, std::vector<glm::mat4>& output);
+        std::vector<std::pair<GridIndex, Tango3DR_Mesh*> > ReadPreview(int index, bool empty,
+                                                                       bool* success = nullptr);
         void ReadState(int& count, int& width, int& height, double& cx, double& cy, double& fx, double& fy);
+        bool ResetState();
         float ReadYaw();
 
-        void WriteDistortion(std::vector<float> data);
-        void WritePointCloud(int index, Tango3DR_PointCloud t3dr_depth);
-        void WritePose(int index, std::vector<glm::mat4> pose);
-        void WritePreview(int index, std::vector<std::pair<GridIndex, Tango3DR_Mesh*> > preview);
-        void WriteState(int count, int width, int height, double cx, double cy, double fx, double fy);
+        bool WriteDistortion(const std::vector<float>& data);
+        bool WritePointCloud(int index, Tango3DR_PointCloud t3dr_depth);
+        bool WritePose(int index, const std::vector<glm::mat4>& pose);
+        bool WritePreview(int index, const std::vector<std::pair<GridIndex, Tango3DR_Mesh*> >& preview);
+        bool WriteState(int count, int width, int height, double cx, double cy, double fx, double fy);
         void WriteYaw(float yaw);
 
     private:

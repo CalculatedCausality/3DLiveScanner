@@ -1,29 +1,20 @@
 cmake_minimum_required(VERSION 3.0.2)
 
-find_library(turbojpeg-lib turbojpeg)
-find_library(png-lib png)
-find_package(OpenCV REQUIRED)
+include(../common/sources.cmake)
+
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
 include_directories(
     ../common
     ../third_party/tango_3d_reconstruction/include
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 add_executable(
     dataset_extractor
-    ../common/data/dataset.cc
-    ../common/data/depthmap.cc
-    ../common/data/file3d.cc
-    ../common/data/image.cc
-    ../common/data/mesh.cc
-    ../common/editor/rasterizer.cc
-    ../common/exporter/csvposes.cc
-    ../common/exporter/depthmaps.cc
-    ../common/exporter/exporter.cc
-    ../common/exporter/floorpln.cc
-    ../common/exporter/ply.cc
-    ../common/gl/camera.cc
-    ../common/postproc/texturize.cc
+    ${SCANNER_DATA_SOURCES}
+    ${SCANNER_GL_SOURCES}
+    ${SCANNER_EXTRACTOR_SOURCES}
     app.cpp
 )
 

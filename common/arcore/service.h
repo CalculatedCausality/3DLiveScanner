@@ -5,7 +5,10 @@
 #include <queue>
 #include <jni.h>
 #include <arcore/arcore.h>
+#if !SCANNER_MODERN
 #include <arcore/arengine.h>
+#endif
+#include <arcore/backend.h>
 
 namespace oc {
 
@@ -27,6 +30,7 @@ namespace oc {
         void Clear(bool detach = true);
 
         void OnPause();
+        void OnGlContextLost();
 
         void OnResume();
 
@@ -41,7 +45,7 @@ namespace oc {
         std::vector<glm::vec3> GetActiveAnchors();
 
         std::vector<float> GetDistortion();
-        
+
         Mesh GetFace();
 
         Image* GetDepthmap();
@@ -77,10 +81,12 @@ namespace oc {
         void SetOffset(float offset);
 
         void SetResolution(float res);
+        void ConfigureDepthTest(bool enabled,uint64_t generation) { backend->ConfigureDepthTest(enabled,generation); }
+        std::shared_ptr<depth_test::Frame> TakeDepthTestFrame() { return backend->TakeDepthTestFrame(); }
+        std::string GetCaptureDiagnostics() { return backend->GetCaptureDiagnostics(); }
 
     private:
-        ARCore* google;
-        AREngine* huawei;
+        ARBackend* backend;
 
         GLRenderer *renderer = nullptr;
 

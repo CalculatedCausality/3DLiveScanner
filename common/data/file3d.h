@@ -17,7 +17,7 @@ public:
     static glm::ivec3 DecodeColor(unsigned int c);
     TYPE GetType() { return type; }
     void ReadModel(int subdivision, std::vector<oc::Mesh>& output);
-    void WriteModel(std::vector<Mesh>& model, bool extra = false);
+    bool WriteModel(std::vector<Mesh>& model, bool extra = false);
 
 private:
     void CleanStr(std::string& str);
@@ -25,20 +25,21 @@ private:
     void ParsePCL(int subdivision, std::vector<Mesh> &output);
     void ParsePLY(int subdivision, std::vector<Mesh> &output);
     void ReadHeader();
-    unsigned int ScanDec(char *line, int offset);
-    bool StartsWith(std::string s, std::string e);
-    void WriteHeader(std::vector<Mesh>& model);
+    bool StartsWith(const std::string& s, const std::string& e);
+    bool WriteHeader(std::vector<Mesh>& model);
     void WritePointCloud(Mesh& mesh);
-    void WriteFaces(Mesh& mesh, int offset);
+    void WriteFaces(Mesh& mesh, size_t offset, size_t normalOffset, size_t uvOffset);
 
     TYPE type;
     std::string path;
     bool writeMode;
     bool hasColors;
+    bool hasNormals;
+    bool validHeader;
+    std::vector<std::string> vertexProperties;
     unsigned int faceCount;
     unsigned int vertexCount;
     FILE* file;
-    std::map<std::string, int> fileToIndex;
     std::map<std::string, glm::vec3> keyToColor;
     std::map<std::string, std::string> keyToFile;
 };

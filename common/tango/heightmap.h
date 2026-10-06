@@ -156,7 +156,7 @@ public:
 
     void Clear();
 
-    void ConvertFrame(Tango3DR_Vector4* points, int size, std::vector<glm::mat4> pose);
+    void ConvertFrame(Tango3DR_Vector4* points, int size, const std::vector<glm::mat4>& pose);
 
     float CountScore(std::vector<HeightmapEdge>& areaEdges, glm::vec4& relocalisation);
 

@@ -1,9 +1,28 @@
 #include <arcore/arengine.h>
+#include <arcore/geometry_validation.h>
 #include <media/NdkImageReader.h>
 #include <delaunay.h>
 #include "service.h"
 
 namespace oc {
+
+    namespace {
+        geometry::Plane ReadPlane(HwArImage* image) {
+            geometry::Plane p;
+            if (!image) return p;
+            const AImage* ndk = nullptr;
+            HwArImage_getNdkImage(image, &ndk);
+            if (!ndk) return p;
+            uint8_t* data = nullptr;
+            if (AImage_getWidth(ndk, &p.width) != AMEDIA_OK ||
+                AImage_getHeight(ndk, &p.height) != AMEDIA_OK ||
+                AImage_getPlaneRowStride(ndk, 0, &p.rowStride) != AMEDIA_OK ||
+                AImage_getPlanePixelStride(ndk, 0, &p.pixelStride) != AMEDIA_OK ||
+                AImage_getPlaneData(ndk, 0, &data, &p.length) != AMEDIA_OK) return geometry::Plane();
+            p.data = data;
+            return p;
+        }
+    }
 
     AREngine::AREngine(void *env, void *context, bool depthCamera, bool faceMode, bool flashlight) {
         offset = 0;
@@ -61,6 +80,8 @@ namespace oc {
     }
 
     void AREngine::Clear(bool detach) {
+        frame_valid_ = false;
+        points.clear();
         if (detach) {
             for (auto& anchor : ar_anchor_list) {
                 HwArAnchor_detach(ar_session_, ar_anchor_list[anchor.first]);
@@ -72,6 +93,8 @@ namespace oc {
     }
 
     void AREngine::OnPause() {
+        frame_valid_ = false;
+        points.clear();
         HwArSession_pause(ar_session_);
     }
 
@@ -133,6 +156,9 @@ namespace oc {
     }
 
     bool AREngine::Process(bool update) {
+        frame_valid_ = false;
+        points.clear();
+        if (!ar_session_ || !ar_frame_) return false;
         if (update) {
             if (!texture_initialized_) {
                 HwArSession_setCameraTextureName(ar_session_, camera.GetTextureName());
@@ -142,11 +168,13 @@ namespace oc {
                 return false;
         }
 
-        HwArCamera *ar_camera;
+        HwArCamera *ar_camera = nullptr;
         HwArFrame_acquireCamera(ar_session_, ar_frame_, &ar_camera);
-        HwArCamera_getViewMatrix(ar_session_, ar_camera, glm::value_ptr(view_mat));
+        if (!ar_camera) return false;
+        glm::mat4 view(0), projection(0);
+        HwArCamera_getViewMatrix(ar_session_, ar_camera, glm::value_ptr(view));
         HwArCamera_getProjectionMatrix(ar_session_, ar_camera, 0.001f, 100.f,
-                                           glm::value_ptr(projection_mat));
+                                           glm::value_ptr(projection));
 
         if (!face_mode_) {
             HwArTrackingState state = HWAR_TRACKING_STATE_STOPPED;
@@ -158,7 +186,14 @@ namespace oc {
         }
 
         HwArCamera_release(ar_camera);
-        return !GetActiveAnchors().empty() || ar_anchor_list.empty();
+        if (!geometry::RigidPose(view) || !geometry::Invertible(projection)) {
+            LOGE("AREngine: rejected invalid camera geometry");
+            return false;
+        }
+        view_mat = view;
+        projection_mat = projection;
+        frame_valid_ = face_mode_ || !GetActiveAnchors().empty() || UpdateAnchor();
+        return frame_valid_;
     }
 
     void AREngine::RenderCamera(ARCoreCamera::Effect effect, int scale) {
@@ -171,7 +206,7 @@ namespace oc {
             else
                 img = GetDepthMap(false, true, scale);
             if (img) {
-                GLuint texture = GLSL::Image2GLTexture(img);
+                GLuint texture = GLSL::Image2GLTexture(img, false);
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, texture);
                 camera.GetShader()->Bind();
@@ -190,16 +225,24 @@ namespace oc {
         HwArPose *ar_pose;
         HwArPose_create(ar_session_, data, &ar_pose);
         std::vector<glm::vec3> output;
+        output.reserve(ar_anchor_list.size());
 
-        for (auto& anchor : ar_anchor_list) {
+        for (auto it = ar_anchor_list.begin(); it != ar_anchor_list.end();) {
+            auto& anchor = *it;
             HwArTrackingState state = HWAR_TRACKING_STATE_STOPPED;
             HwArAnchor_getTrackingState(ar_session_, anchor.second, &state);
+            if (state == HWAR_TRACKING_STATE_STOPPED) {
+                HwArAnchor_release(anchor.second);
+                it = ar_anchor_list.erase(it);
+                continue;
+            }
             if (state == HWAR_TRACKING_STATE_TRACKING) {
                 HwArAnchor_getPose(ar_session_, anchor.second, ar_pose);
                 HwArPose_getPoseRaw(ar_session_, ar_pose, data);
                 glm::vec3 v = glm::vec3(data[4], data[5], data[6]);
-                output.push_back(v);
+                if (geometry::GridPosition(v, ANCHOR_DENSITY_BASE)) output.push_back(v);
             }
+            ++it;
         }
         HwArPose_destroy(ar_pose);
         return output;
@@ -217,6 +260,7 @@ namespace oc {
         HwArCamera_release(ar_camera);
 
         std::vector<float> output;
+        output.reserve(5);
         output.push_back(distortion[0]);
         output.push_back(distortion[1]);
         output.push_back(distortion[3]);
@@ -255,36 +299,38 @@ namespace oc {
         return glm::vec3(INT_MAX);
     }
 
-    Image* AREngine::GetDepthMap(bool confidence, bool increasing, int s) {
+    void AREngine::RemoveFaceDetails() {
+        LOGE("RemoveFaceDetails on AREngine is unsupported");
+    }
 
+    Image* AREngine::GetDepthMap(bool confidence, bool increasing, int s) {
+        if (s <= 0) return nullptr;
         if (useDepth) {
             HwArImage* image = 0;
             if (HwArFrame_acquireDepthImage(ar_session_, ar_frame_, &image) == HWAR_SUCCESS) {
 
                 //get depth data
-                const AImage *depthMap = 0;
-                HwArImage_getNdkImage(image, &depthMap);
-                uint16_t *imgData;
-                int dataLength;
-                int32_t depthWidth = 0, depthHeight = 0, stride = 0;
-                if (AImage_getWidth(depthMap, &depthWidth) != AMEDIA_OK) { HwArImage_release(image); return 0; }
-                if (AImage_getHeight(depthMap, &depthHeight) != AMEDIA_OK) { HwArImage_release(image); return 0; }
-                if (AImage_getPlaneRowStride(depthMap, 0, &stride) != AMEDIA_OK) { HwArImage_release(image); return 0; }
-                if (AImage_getPlaneData(depthMap, 0, (uint8_t **) &imgData, &dataLength) != AMEDIA_OK) { HwArImage_release(image); return 0; }
+                const geometry::Plane depthPlane = ReadPlane(image);
+                int32_t depthWidth = depthPlane.width, depthHeight = depthPlane.height;
+                if (!depthPlane.Valid(2) || s > depthWidth || s > depthHeight) {
+                    HwArImage_release(image);
+                    return nullptr;
+                }
 
                 depthWidth /= s;
                 depthHeight /= s;
                 Image* output = new Image(depthWidth, depthHeight);
                 for (int y = 0; y < depthHeight; y++) {
                     for (int x = 0; x < depthWidth; x++) {
-                        int depth = static_cast<int>((imgData[s * y * stride / 2 + s * x] & 0x1FFF) * 0.001 * 255);
+                        const uint16_t packed = depthPlane.Depth(s * x, s * y);
+                        int depth = static_cast<int>((packed & 0x1FFF) * 0.001 * 255);
                         if (!increasing && depth > 0) depth = 768 - depth;
                         output->GetData()[(y * depthWidth + x) * 4 + 0] = camera.Convert(depth, 0);
                         output->GetData()[(y * depthWidth + x) * 4 + 1] = camera.Convert(depth, 1);
                         output->GetData()[(y * depthWidth + x) * 4 + 2] = camera.Convert(depth, 2);
                         output->GetData()[(y * depthWidth + x) * 4 + 3] = 255;
                         if (confidence) {
-                            int depthConfidence = ((imgData[s * y * stride / 2 + s * x] >> 13) & 0x7);
+                            int depthConfidence = ((packed >> 13) & 0x7);
                             float depthPercentage = depthConfidence == 0 ? 1.f : (depthConfidence - 1) / 7.f;
                             output->GetData()[(y * depthWidth + x) * 4 + 3] *= 0.5f + depthPercentage * 0.5f;
                         }
@@ -298,10 +344,6 @@ namespace oc {
     }
 
     bool AREngine::UpdateAnchor() {
-        if (!ar_anchor_list.empty() && GetActiveAnchors().empty()) {
-            return false;
-        }
-
         float data[7] = {0, 0, 0, 1, 0, 0, 0};
         HwArPose *ar_pose;
         HwArPose_create(ar_session_, data, &ar_pose);
@@ -328,6 +370,10 @@ namespace oc {
                         HwArPoint_getPose(ar_session_, HwArAsPoint(trackable), ar_pose);
                         HwArPose_getPoseRaw(ar_session_, ar_pose, data);
                         glm::vec3 v = glm::vec3(data[4], data[5], data[6]);
+                        if (!geometry::GridPosition(v, ANCHOR_DENSITY_BASE)) {
+                            HwArTrackable_release(trackable);
+                            continue;
+                        }
 
                         id3d pos;
                         float density = ANCHOR_DENSITY_BASE;
@@ -335,17 +381,27 @@ namespace oc {
                             pos.x = static_cast<int>(v.x / density);
                             pos.y = static_cast<int>(v.y / density);
                             pos.z = static_cast<int>(v.z / density);
-                            valid = true;
+                            auto existing = ar_anchor_list.find(pos);
+                            if (existing != ar_anchor_list.end()) {
+                                HwArTrackingState state = HWAR_TRACKING_STATE_STOPPED;
+                                HwArAnchor_getTrackingState(ar_session_, existing->second, &state);
+                                if (state != HWAR_TRACKING_STATE_TRACKING) {
+                                    HwArAnchor_detach(ar_session_, existing->second);
+                                    HwArAnchor_release(existing->second);
+                                    ar_anchor_list.erase(existing);
+                                } else valid = true;
+                            }
                             if (ar_anchor_list.find(pos) == ar_anchor_list.end()) {
                                 HwArStatus ret = HwArTrackable_acquireNewAnchor(ar_session_, trackable, ar_pose, &ar_anchor_);
                                 if (ret == HWAR_SUCCESS) {
+                                    valid = true;
                                     ar_anchor_list[pos] = ar_anchor_;
                                     while (true) {
                                         int count = 0;
                                         id3d far = pos;
                                         for (auto& anchor : ar_anchor_list) {
                                             if (anchor.first.layer == pos.layer) {
-                                                if (Diff(anchor.first, pos) > Diff(far, pos)) {
+                                                if (geometry::GridDistanceSquared(anchor.first, pos) > geometry::GridDistanceSquared(far, pos)) {
                                                     far = anchor.first;
                                                 }
                                                 count++;
@@ -371,7 +427,7 @@ namespace oc {
         HwArHitResultList_destroy(hits);
         HwArHitResult_destroy(hit);
         HwArPose_destroy(ar_pose);
-        return valid;
+        return valid || !GetActiveAnchors().empty();
     }
 
     void AREngine::UpdateFace(glm::mat4 matrix) {
@@ -474,10 +530,8 @@ namespace oc {
     }
 
     void AREngine::UpdateFeaturePoints() {
-        if (!UpdateAnchor()) {
-            points.clear();
-            return;
-        }
+        points.clear();
+        if (!frame_valid_ || !UpdateAnchor()) return;
 
         HwArPointCloud *ar_point_cloud = nullptr;
         HwArStatus point_cloud_status = HwArFrame_acquirePointCloud(ar_session_, ar_frame_, &ar_point_cloud);
@@ -485,61 +539,55 @@ namespace oc {
         if (point_cloud_status == HWAR_SUCCESS) {
             //get point cloud
             HwArPointCloud_getNumberOfPoints(ar_session_, ar_point_cloud, &number_of_points);
-            const float *point_cloud_data;
+            const float *point_cloud_data = nullptr;
             HwArPointCloud_getData(ar_session_, ar_point_cloud, &point_cloud_data);
 
-            if (number_of_points > 0)
-                points.clear();
-            for (int i = 0; i < number_of_points * 4; i += 4) {
-                points.push_back(glm::vec4(point_cloud_data[i + 0], point_cloud_data[i + 1],
-                                           point_cloud_data[i + 2], point_cloud_data[i + 3]));
+            for (int i = 0; point_cloud_data && i < number_of_points; ++i) {
+                const float* data = point_cloud_data + size_t(i) * 4;
+                const glm::vec4 p(data[0], data[1], data[2], data[3]);
+                if (geometry::Point(p)) points.push_back(p);
             }
             HwArPointCloud_release(ar_point_cloud);
         }
 
         if (useDepth) {
+            // A depth frame that is unavailable must not fall back to the sparse
+            // cloud (or the preceding depth frame) while marked as dense input.
+            points.clear();
             camera.InitAREngine(ar_session_, ar_frame_);
-            if (number_of_points > 0) {
+            // A valid tracked depth frame does not require sparse features.
+            {
                 HwArImage *image = 0;
                 if (HwArFrame_acquireDepthImage(ar_session_, ar_frame_, &image) == HWAR_SUCCESS) {
 
                     //get depth data
-                    const AImage *depthMap = 0;
-                    HwArImage_getNdkImage(image, &depthMap);
-                    uint16_t *imgData;
-                    int dataLength;
-                    int32_t depthWidth = 0, depthHeight = 0, stride = 0;
-                    if (AImage_getWidth(depthMap, &depthWidth) != AMEDIA_OK) { HwArImage_release(image); return; }
-                    if (AImage_getHeight(depthMap, &depthHeight) != AMEDIA_OK) { HwArImage_release(image); return; }
-                    if (AImage_getPlaneRowStride(depthMap, 0, &stride) != AMEDIA_OK) { HwArImage_release(image); return; }
-                    if (AImage_getPlaneData(depthMap, 0, (uint8_t **) &imgData, &dataLength) != AMEDIA_OK) { HwArImage_release(image); return; }
-                    points.clear();
+                    const geometry::Plane depthPlane = ReadPlane(image);
+                    if (!depthPlane.Valid(2)) {
+                        LOGE("AREngine: rejected invalid depth plane");
+                        HwArImage_release(image);
+                        return;
+                    }
+                    const int32_t depthWidth = depthPlane.width, depthHeight = depthPlane.height;
 
                     //convert depthmap to pointcloud
                     double len = 100 - 0.001f; //far - near
-                    glm::dmat4 screen2world = glm::inverse(projection_mat * view_mat);
+                    glm::dmat4 screen2world = glm::inverse(glm::dmat4(projection_mat) * glm::dmat4(view_mat));
                     for (int y = 0; y < depthHeight; y++) {
                         for (int x = 0; x < depthWidth; x++) {
                             if ((x < 4) && (y == 0))
                                 continue;
 
-                            double depth = (imgData[y * stride / 2 + x] & 0x1FFF) * 0.001f;
+                            // Huawei DEPTH16 packs confidence in the upper three
+                            // bits; unlike ARCore it is not a full 16-bit range.
+                            double depth = (depthPlane.Depth(x, y) & 0x1FFF) * 0.001f;
                             if ((depth > 0.05) && (depth < 15)) {
                                 depth -= offset;
 
                                 //convert sensor coordinates to screen coordinates
                                 glm::dvec2 T = camera.Transform(x, y, depthWidth, depthHeight);
 
-                                //create a ray from screen space to world space
-                                glm::dvec4 point0 = screen2world * glm::vec4(T, 0, 1);
-                                point0 /= glm::abs(point0.w);
-                                point0.w = 1;
-                                glm::dvec4 point1 = screen2world * glm::vec4(T, 1, 1);
-                                point1 /= glm::abs(point1.w);
-                                point1.w = 1;
-
-                                //get a point on ray that match the depth
-                                points.emplace_back(point0 + (point1 - point0) / len * depth);
+                                const glm::vec4 p = geometry::DepthPoint(screen2world, T, len, depth);
+                                if (geometry::Point(p)) points.push_back(p);
                             }
                         }
                     }
@@ -547,6 +595,6 @@ namespace oc {
                 }
             }
         }
-        has_coordinate_system_ = true;
+        if (!points.empty()) has_coordinate_system_ = true;
     }
 }

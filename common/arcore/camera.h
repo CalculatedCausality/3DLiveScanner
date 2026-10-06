@@ -42,7 +42,9 @@ namespace oc {
 
         void DrawARCore(const ArSession *session, const ArFrame *frame, Effect effect, int w = 0, int h = 0);
 
+#if !SCANNER_MODERN
         void DrawAREngine(const HwArSession *session, const HwArFrame *frame, Effect effect, int w = 0, int h = 0);
+#endif
 
         GLSL* GetShader() { return shader_program_; }
 
@@ -50,7 +52,9 @@ namespace oc {
 
         void InitARCore(const ArSession *session, const ArFrame *frame);
 
+#if !SCANNER_MODERN
         void InitAREngine(const HwArSession *session, const HwArFrame *frame);
+#endif
 
         void SetNVScheme(NightVisionScheme s) { scheme = s; }
 
@@ -71,6 +75,7 @@ namespace oc {
         float minX, minY, maxX, maxY;
         float transformed_uvs_[8];
         bool aabb_initialized_ = false;
+        float aabb_width_ = 0, aabb_height_ = 0;
         bool uvs_initialized_ = false;
         NightVisionScheme scheme = WHITE2RED;
     };

@@ -22,16 +22,16 @@ namespace oc {
     }
 
     void Mesh::GenerateFaceNormals() {
-        normals.clear();
+        normals.resize(vertices.size());
         glm::vec3 a, b, c, n;
         for (unsigned int i = 0; i < vertices.size(); i += 3) {
             a = vertices[i + 0];
             b = vertices[i + 1];
             c = vertices[i + 2];
             n = glm::normalize(glm::cross(a - b, a - c));
-            normals.push_back(n);
-            normals.push_back(n);
-            normals.push_back(n);
+            normals[i + 0] = n;
+            normals[i + 1] = n;
+            normals[i + 2] = n;
         }
     }
 
@@ -141,30 +141,35 @@ namespace oc {
         }
     }
 
-    void Mesh::Reindex() {
-        Mesh temp;
-        temp.vertices = vertices;
-        temp.normals = normals;
-        temp.colors = colors;
-        temp.indices = indices;
-        temp.uv = uv;
-
-        vertices.clear();
-        normals.clear();
-        colors.clear();
-        indices.clear();
-        uv.clear();
-
-        for (unsigned int& i : temp.indices) {
-            if (!temp.vertices.empty())
-                vertices.push_back(temp.vertices[i]);
-            if (!temp.normals.empty())
-                normals.push_back(temp.normals[i]);
-            if (!temp.colors.empty())
-                colors.push_back(temp.colors[i]);
-            if (!temp.uv.empty())
-                uv.push_back(temp.uv[i]);
+    bool Mesh::Reindex() {
+        if ((indices.size() % 3) != 0) return false;
+        for (unsigned int i : indices) {
+            if (i >= vertices.size()) return false;
+            if (!normals.empty() && (i >= normals.size())) return false;
+            if (!colors.empty() && (i >= colors.size())) return false;
+            if (!uv.empty() && (i >= uv.size())) return false;
         }
+        std::vector<glm::vec3> outputVertices;
+        std::vector<glm::vec3> outputNormals;
+        std::vector<unsigned int> outputColors;
+        std::vector<glm::vec2> outputUv;
+        outputVertices.reserve(indices.size());
+        if (!normals.empty()) outputNormals.reserve(indices.size());
+        if (!colors.empty()) outputColors.reserve(indices.size());
+        if (!uv.empty()) outputUv.reserve(indices.size());
+
+        for (unsigned int i : indices) {
+            if (!vertices.empty()) outputVertices.push_back(vertices[i]);
+            if (!normals.empty()) outputNormals.push_back(normals[i]);
+            if (!colors.empty()) outputColors.push_back(colors[i]);
+            if (!uv.empty()) outputUv.push_back(uv[i]);
+        }
+        vertices.swap(outputVertices);
+        normals.swap(outputNormals);
+        colors.swap(outputColors);
+        uv.swap(outputUv);
+        std::vector<unsigned int>().swap(indices);
+        return true;
     }
 
     bool Mesh::IsInAABB(glm::vec3 &p, glm::vec3 &min, glm::vec3 &max) {

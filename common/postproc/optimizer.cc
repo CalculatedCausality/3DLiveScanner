@@ -1,150 +1,175 @@
 #include <data/file3d.h>
 #include <postproc/optimizer.h>
 
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <sys/stat.h>
+#include <unistd.h>
+
 namespace oc {
+    namespace {
+        bool Finite(const glm::dvec3& v) {
+            return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+        }
+
+        bool Rigid(const glm::dmat4& matrix) {
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j)
+                    if (!std::isfinite(matrix[i][j])) return false;
+            if (matrix[3] != glm::dvec4(0, 0, 0, 1) ||
+                matrix[0][3] != 0 || matrix[1][3] != 0 || matrix[2][3] != 0) return false;
+            const glm::dmat3 rotation(matrix);
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    if (std::abs(glm::dot(rotation[i], rotation[j]) - (i == j ? 1.0 : 0.0)) > 1e-12)
+                        return false;
+            return std::abs(glm::determinant(rotation) - 1.0) <= 1e-12;
+        }
+    }
+
     void Optimizer::Process(std::string filename) {
-
-        //load model
+        // The only caller supplies an OBJ path. Never reinterpret a PLY/PCL as OBJ.
+        if (filename.size() < 4 || filename.substr(filename.size() - 4) != ".obj") return;
         std::vector<Mesh> data;
-        File3d(filename, false).ReadModel(INT_MAX, data);
+        File3d(filename, false).ReadModel(std::numeric_limits<int>::max(), data);
 
-        //rotate the model
-        glm::mat4 matrix = CalculateRotation(data);
-        glm::vec3 scale;
-        glm::quat rotation;
-        glm::vec3 translation;
-        glm::vec3 skew;
-        glm::vec4 perspective;
-        glm::decompose(matrix, scale, rotation, translation, skew, perspective);
-        if (glm::abs(glm::length(scale) - glm::length(glm::vec3(1))) < 0.05f) {
-            for (Mesh& mesh : data) {
-                for (glm::vec3& v : mesh.vertices) {
-                    glm::vec4 r = matrix * glm::vec4(v, 1.0f);
-                    v.x = r.x;
-                    v.y = r.z;
-                    v.z =-r.y;
-                }
-                mesh.GenerateFaceNormals();
-            }
-        } else {
-            LOGI("Matrix scale is not correct %f", glm::length(scale) - glm::length(glm::vec3(1)));
-            matrix = glm::mat4(1);
+        glm::dmat4 matrix(1);
+        const bool valid = CalculateRotation(data, matrix) && Finish(data, filename, matrix);
+        for (Mesh& mesh : data) mesh.Destroy();
+        if (!valid) {
+            LOGI("Object alignment skipped: no valid rigid transform or OBJ rewrite failed");
         }
-
-        Finish(data, filename, matrix);
     }
 
-    glm::mat4 Optimizer::CalculateRotation(std::vector<Mesh>& data) {
-
-        //get the biggest face normal
-        float best = 0;
-        glm::vec3 normal(0);
-        for (Mesh& m : data) {
-            m.GenerateFaceNormals();
-            for (unsigned int i = 0; i < m.normals.size(); i += 3) {
-                glm::vec3 a = m.vertices[i + 0];
-                glm::vec3 b = m.vertices[i + 1];
-                glm::vec3 c = m.vertices[i + 2];
-                float ab = glm::distance(a, b);
-                float ac = glm::distance(a, c);
-                float bc = glm::distance(b, c);
-                float perimeter = ab + ac + bc;
-
-                if (best < perimeter) {
+    bool Optimizer::CalculateRotation(const std::vector<Mesh>& data, glm::dmat4& matrix) {
+        // Retain the existing largest-perimeter rule and winding sign. Derive
+        // normals from geometry, not supplied (possibly zero/nonfinite) normals.
+        double best = 0;
+        glm::dvec3 normal(0);
+        for (const Mesh& mesh : data) {
+            // File3d's OBJ loader returns flat triangles. Do not mutate this data.
+            for (size_t i = 0; i + 2 < mesh.vertices.size(); i += 3) {
+                const glm::dvec3 a(mesh.vertices[i]), b(mesh.vertices[i + 1]), c(mesh.vertices[i + 2]);
+                if (!Finite(a) || !Finite(b) || !Finite(c)) continue;
+                const glm::dvec3 cross = glm::cross(b - a, c - a);
+                const double length = glm::length(cross);
+                if (!(length > 0) || !std::isfinite(length)) continue;
+                const double perimeter = glm::length(b - a) + glm::length(c - a) + glm::length(c - b);
+                if (perimeter > best && std::isfinite(perimeter)) {
                     best = perimeter;
-                    normal = -m.normals[i];
+                    normal = -cross / length;
                 }
             }
         }
+        if (!(best > 0)) return false;
 
-        //generate matrix
-        glm::vec3 xaxis = glm::normalize(glm::cross(glm::vec3(0, 1, 0), normal));
-        glm::vec3 yaxis = glm::normalize(glm::cross(normal, xaxis));
-        glm::mat4 output(1);
-        output[0][0] = xaxis.x;
-        output[0][1] = yaxis.x;
-        output[0][2] = normal.x;
-        output[1][0] = xaxis.y;
-        output[1][1] = yaxis.y;
-        output[1][2] = normal.y;
-        output[2][0] = xaxis.z;
-        output[2][1] = yaxis.z;
-        output[2][2] = normal.z;
-        return output;
+        glm::dvec3 xaxis = glm::cross(glm::dvec3(0, 1, 0), normal);
+        // Y-parallel normals have no heading from cross(up, normal). In the
+        // float-input uncertainty band use projected world +X, a deterministic
+        // roll choice (+Y yields identity, -Y a half-turn about X).
+        const double poleTolerance = 8.0 * std::numeric_limits<float>::epsilon();
+        if (glm::length(xaxis) <= poleTolerance)
+            xaxis = glm::dvec3(1, 0, 0) - normal * normal.x;
+        xaxis = glm::normalize(xaxis);
+        const glm::dvec3 yaxis = glm::normalize(glm::cross(normal, xaxis));
+
+        // Include the historic (x,z,-y) conversion in this ONE rotation. Bounds,
+        // positions and normals must all use exactly the same coordinate frame.
+        matrix = glm::dmat4(1);
+        for (int i = 0; i < 3; ++i) {
+            matrix[i][0] = xaxis[i];
+            matrix[i][1] = normal[i];
+            matrix[i][2] = -yaxis[i];
+        }
+        return Rigid(matrix);
     }
 
-    void Optimizer::Finish(std::vector<Mesh>& data, std::string filename, glm::mat4 matrix) {
-#ifndef ANDROID
-        filename += ".obj";
-#endif
-
-        //get dimensions
-        glm::vec3 min(INT_MAX);
-        glm::vec3 max(INT_MIN);
-        for (Mesh& mesh : data) {
-            for (glm::vec3& v : mesh.vertices) {
-                if (min.x > v.x) min.x = v.x;
-                if (min.y > v.y) min.y = v.y;
-                if (min.z > v.z) min.z = v.z;
-                if (max.x < v.x) max.x = v.x;
-                if (max.y < v.y) max.y = v.y;
-                if (max.z < v.z) max.z = v.z;
+    bool Optimizer::Finish(const std::vector<Mesh>& data, const std::string& filename,
+                           const glm::dmat4& matrix) {
+        if (!Rigid(matrix)) return false;
+        glm::dvec3 min(std::numeric_limits<double>::infinity());
+        glm::dvec3 max(-std::numeric_limits<double>::infinity());
+        bool hasVertex = false;
+        for (const Mesh& mesh : data) {
+            for (const glm::vec3& vertex : mesh.vertices) {
+                const glm::dvec3 v(matrix * glm::dvec4(vertex, 1));
+                if (!Finite(v)) return false;
+                min = glm::min(min, v);
+                max = glm::max(max, v);
+                hasVertex = true;
             }
         }
-
-        //recenter
-        glm::vec3 center = (min + max) / 2.0f;
+        if (!hasVertex) return false;
+        // Keep the existing floor-centering policy, not an arbitrary new origin.
+        glm::dvec3 center = min * 0.5 + max * 0.5;
         center.y = min.y;
-        for (Mesh& mesh : data) {
-            for (glm::vec3& v : mesh.vertices) {
-                v -= center;
 
-            }
-        }
+        std::ifstream input(filename);
+        if (!input) return false;
+        std::string temporary = filename + ".align-XXXXXX";
+        std::vector<char> name(temporary.begin(), temporary.end());
+        name.push_back('\0');
+        int fd = mkstemp(name.data());
+        if (fd < 0) return false;
+        FILE* output = fdopen(fd, "w");
+        if (!output) { close(fd); unlink(name.data()); return false; }
+        struct stat status;
+        bool ok = stat(filename.c_str(), &status) == 0 && fchmod(fd, status.st_mode & 0777) == 0;
 
-        //parse model
-        float w;
-        glm::vec3 p, v;
-        char buffer[1024];
-        std::vector<std::string> model;
-        FILE* file = fopen(filename.c_str(), "r");
-        while (true) {
-            if (!fgets(buffer, 1024, file))
-                break;
-            std::string sbuf = buffer;
-            while(!sbuf.empty() && isspace(sbuf[0])) {
-                sbuf = sbuf.substr(1);
-            }
-            if ((sbuf[0] == 'v') && (sbuf[1] != 't')) {
-                if (sbuf[1] == ' ') {
-                    sscanf(sbuf.c_str(), "v %f %f %f", &p.x, &p.y, &p.z);
-                    w = 1;
-                } else {
-                    sscanf(sbuf.c_str(), "vn %f %f %f", &p.x, &p.y, &p.z);
-                    w = 0;
+        // Stream into a sibling temporary file: malformed coordinates, failed
+        // writes or overflow must not leave the original OBJ half transformed.
+        std::string line;
+        while (ok && std::getline(input, line)) {
+            const bool newline = !input.eof();
+            std::istringstream record(line);
+            record.imbue(std::locale::classic());
+            std::string kind;
+            record >> kind;
+            if (kind == "v" || kind == "vn") {
+                glm::dvec3 p;
+                if (!(record >> p.x >> p.y >> p.z) || !Finite(p)) { ok = false; break; }
+                std::string suffix;
+                std::getline(record, suffix);
+                if (kind == "v") {
+                    // File3d does not dehomogenize v x y z w. Do not silently
+                    // translate weighted coordinates. RGB(A) suffixes survive.
+                    std::istringstream extra(suffix);
+                    extra.imbue(std::locale::classic());
+                    double value;
+                    std::vector<double> values;
+                    while (extra >> value) values.push_back(value);
+                    if ((values.size() == 1 && values[0] != 1.0) || values.size() == 2) {
+                        ok = false;
+                        break;
+                    }
                 }
-                glm::vec4 r = matrix * glm::vec4(p, w);
-                v.x = r.x;
-                v.y = r.z;
-                v.z =-r.y;
-                v -= center * w;
-                if (sbuf[1] == ' ') {
-                    sprintf(buffer, "v %f %f %f\n", v.x, v.y, v.z);
-                } else {
-                    sprintf(buffer, "vn %f %f %f\n", v.x, v.y, v.z);
+                const glm::dvec3 transformed = glm::dvec3(matrix * glm::dvec4(p, 0)) -
+                                               (kind == "v" ? center : glm::dvec3(0));
+                const double limit = std::numeric_limits<float>::max();
+                if (!Finite(transformed) || std::abs(transformed.x) > limit ||
+                    std::abs(transformed.y) > limit || std::abs(transformed.z) > limit) {
+                    ok = false;
+                    break;
                 }
-                model.emplace_back(buffer);
-            } else {
-                model.push_back(sbuf);
+                std::ostringstream text;
+                text.imbue(std::locale::classic());
+                text << std::setprecision(17) << kind << ' ' << transformed.x << ' '
+                     << transformed.y << ' ' << transformed.z << suffix;
+                line = text.str();
             }
+            if (fwrite(line.data(), 1, line.size(), output) != line.size() ||
+                (newline && fputc('\n', output) == EOF)) ok = false;
         }
-        fclose(file);
-
-        //save model
-        file = fopen(filename.c_str(), "w");
-        for (std::string& s : model) {
-            fprintf(file, "%s", s.c_str());
-        }
-        fclose(file);
+        if (input.bad()) ok = false;
+        if (fflush(output) != 0 || fsync(fd) != 0) ok = false;
+        if (fclose(output) != 0) ok = false;
+        input.close();
+        if (ok && rename(name.data(), filename.c_str()) == 0) return true;
+        unlink(name.data());
+        return false;
     }
 }

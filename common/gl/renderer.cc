@@ -20,32 +20,29 @@ std::string RTTVertexShader() {
 }
 
 namespace oc {
-    GLRenderer::GLRenderer() {
-        fboID = 0;
-        rboID = 0;
-        rendertexture = 0;
-        scene = 0;
-    }
+    GLRenderer::GLRenderer() : scene(0), rendertexture(0), fboID(0), rboID(0), ownsBuffers(false) {}
 
     GLRenderer::~GLRenderer() {
         Cleanup();
     }
 
+    void GLRenderer::AbandonGlContext() {
+        ownsBuffers = false;
+        fboID = rboID = rendertexture = 0;
+        if (scene) {
+            scene->AbandonGlContext();
+            delete scene;
+            scene = 0;
+        }
+    }
+
     void GLRenderer::Cleanup() {
-        if (fboID) {
-            glDeleteFramebuffers(1, fboID);
-            delete[] fboID;
-            fboID = 0;
-        }
-        if (rboID) {
-            glDeleteRenderbuffers(1, rboID);
-            delete[] rboID;
-            rboID = 0;
-        }
-        if (rendertexture) {
-            glDeleteTextures(1, rendertexture);
-            delete[] rendertexture;
-            rendertexture = 0;
+        if (ownsBuffers) {
+            glDeleteFramebuffers(1, &fboID);
+            glDeleteRenderbuffers(1, &rboID);
+            glDeleteTextures(1, &rendertexture);
+            ownsBuffers = false;
+            fboID = rboID = rendertexture = 0;
         }
         if (scene) {
             delete scene;
@@ -61,13 +58,11 @@ namespace oc {
         Cleanup();
 
         //create frame buffer
-        fboID = new unsigned int[1];
-        rboID = new unsigned int[1];
-        rendertexture = new unsigned int[1];
+        ownsBuffers = true;
 
         //framebuffer textures
-        glGenTextures(1, rendertexture);
-        glBindTexture(GL_TEXTURE_2D, rendertexture[0]);
+        glGenTextures(1, &rendertexture);
+        glBindTexture(GL_TEXTURE_2D, rendertexture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -75,15 +70,15 @@ namespace oc {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rWidth, rHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 
         /// create render buffer for depth buffer
-        glGenRenderbuffers(1, rboID);
-        glBindRenderbuffer(GL_RENDERBUFFER, rboID[0]);
+        glGenRenderbuffers(1, &rboID);
+        glBindRenderbuffer(GL_RENDERBUFFER, rboID);
         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, rWidth, rHeight);
 
         //framebuffers
-        glGenFramebuffers(1, fboID);
-        glBindFramebuffer(GL_FRAMEBUFFER, fboID[0]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rendertexture[0], 0);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboID[0]);
+        glGenFramebuffers(1, &fboID);
+        glBindFramebuffer(GL_FRAMEBUFFER, fboID);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rendertexture, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboID);
 
         /// check FBO status
         if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
@@ -106,7 +101,7 @@ namespace oc {
 
     Image* GLRenderer::ReadRtt(int x, int y, int w, int h) {
         Image* output = new Image(w, h);
-        glBindFramebuffer(GL_FRAMEBUFFER, fboID[0]);
+        glBindFramebuffer(GL_FRAMEBUFFER, fboID);
         glViewport(x, y, output->GetWidth(), output->GetHeight());
         glReadPixels(x, y, output->GetWidth(), output->GetHeight(), GL_RGBA, GL_UNSIGNED_BYTE, output->GetData());
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -116,20 +111,29 @@ namespace oc {
 
     void GLRenderer::Render(float* vertices, float* normals, float* uv, unsigned int* colors,
                             unsigned long size, unsigned int* indices, int type) {
+        PrepareRender();
+        RenderPrepared(vertices, normals, uv, colors, size, indices, type);
+    }
+
+    void GLRenderer::PrepareRender() {
+        if (!GLSL::CurrentShader()) return;
         GLSL::CurrentShader()->UniformMatrix("MVP", glm::value_ptr(camera.projection * camera.GetView()));
+    }
+
+    void GLRenderer::RenderPrepared(float* vertices, float* normals, float* uv, unsigned int* colors,
+                                    unsigned long size, unsigned int* indices, int type) {
+        if (!GLSL::CurrentShader() || !vertices || (size == 0)) return;
         GLSL::CurrentShader()->Attrib(vertices, normals, uv, colors);
 
-        if (size > 0) {
-            if (indices)
-              glDrawElements(type, (GLsizei) size, GL_UNSIGNED_INT, indices);
-            else
-              glDrawArrays(type, 0, (GLsizei) size);
-        }
+        if (indices)
+          glDrawElements(type, (GLsizei) size, GL_UNSIGNED_INT, indices);
+        else
+          glDrawArrays(type, 0, (GLsizei) size);
     }
 
     void GLRenderer::Rtt(bool enable) {
         if (enable) {
-            glBindFramebuffer(GL_FRAMEBUFFER, fboID[0]);
+            glBindFramebuffer(GL_FRAMEBUFFER, fboID);
             glViewport(0, 0, rWidth, rHeight);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             glEnable(GL_DEPTH_TEST);

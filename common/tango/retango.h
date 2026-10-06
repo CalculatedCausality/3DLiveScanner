@@ -53,6 +53,7 @@ namespace oc {
         bool LineTest(int x1, int y1, int x2, int y2);
         bool RectTest(double p, double q, double &t1, double &t2);
         void UpdateCaches(Image* img, glm::mat4& pose);
+        void UpdateConvertedCache();
         void UpdateDelaunayEstimation(glm::mat4& pose);
         void UpdateMasked(glm::mat4& pose, int s = 15);
         void UpdatePairEstimation(glm::mat4 &pose);
@@ -64,6 +65,8 @@ namespace oc {
         std::vector<glm::vec3> input;
         std::vector<glm::vec4> merged;
         std::vector<glm::vec4> output;
+        bool convertedReady;
+        glm::mat4 convertedPose;
 
         //masks
         bool* finished;

@@ -19,6 +19,10 @@ std::vector<long> image_textureToDelete;
 
 namespace oc {
 
+    void Image::AbandonTextures() {
+        image_textureToDelete.clear();
+    }
+
     Image::Image(unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
         width = 1;
         height = 1;
@@ -48,6 +52,9 @@ namespace oc {
         name = filename;
         instances = 1;
         texture = -1;
+        data = nullptr;
+        width = 0;
+        height = 0;
 
         std::string ext = GetExtension();
         if (ext.compare("jpg") == 0)
@@ -68,15 +75,15 @@ namespace oc {
     Image::~Image() {
         delete[] data;
         if (srcPlanes[1])
-            delete srcPlanes[1];
+            delete[] srcPlanes[1];
         if (srcPlanes[2])
-            delete srcPlanes[2];
+            delete[] srcPlanes[2];
         srcPlanes[1] = 0;
         srcPlanes[2] = 0;
         if (graySrcPlanes[1])
-            delete graySrcPlanes[1];
+            delete[] graySrcPlanes[1];
         if (graySrcPlanes[2])
-            delete graySrcPlanes[2];
+            delete[] graySrcPlanes[2];
         graySrcPlanes[1] = 0;
         graySrcPlanes[2] = 0;
     }
@@ -116,30 +123,43 @@ namespace oc {
     }
 
     unsigned char* Image::ExtractYUVDownscaled(unsigned int s) {
-        int yIndex = 0;
-        unsigned int uvIndex = width / s * height / s;
-        int R, G, B, Y, U, V;
-        int index = 0;
-        bool odd = false;
-        unsigned char* output = new unsigned char[uvIndex * 2];
-        for (unsigned int y = 0; y < height; y += s) {
-            odd = !odd;
-            for (unsigned int x = 0; x < width; x += s) {
-                B = data[((height - 1 - y) * width + x) * 4 + 0];
-                G = data[((height - 1 - y) * width + x) * 4 + 1];
-                R = data[((height - 1 - y) * width + x) * 4 + 2];
-
-                //RGB to YUV algorithm
-                Y = ( (  66 * R + 129 * G +  25 * B + 128) >> 8) +  16;
-                V = ( ( -38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
-                U = ( ( 112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
-
-                output[yIndex++] = (uint8_t) ((Y < 0) ? 0 : ((Y > 255) ? 255 : Y));
-                if (odd && index % 2 == 0) {
-                    output[uvIndex++] = (uint8_t)((V<0) ? 0 : ((V > 255) ? 255 : V));
-                    output[uvIndex++] = (uint8_t)((U<0) ? 0 : ((U > 255) ? 255 : U));
+        if (!IsValid() || s == 0) return nullptr;
+        const unsigned int w = static_cast<unsigned int>(width) / s;
+        const unsigned int h = static_cast<unsigned int>(height) / s;
+        // The caller declares this exact width/height/stride to the 4:2:0 SDK.
+        // Odd output dimensions cannot describe the packed chroma rows safely.
+        if (!w || !h || (w & 1) || (h & 1)) return nullptr;
+        const size_t pixels = static_cast<size_t>(w) * h;
+        unsigned char* output = new unsigned char[pixels + pixels / 2];
+        unsigned char* chroma = output + pixels;
+        for (unsigned int y = 0; y < h; ++y) {
+            const unsigned char* source = data +
+                    static_cast<size_t>(height - 1 - y * s) * width * 4;
+            unsigned char* luma = output + static_cast<size_t>(y) * w;
+            for (unsigned int x = 0; x < w; ++x, source += static_cast<size_t>(s) * 4) {
+                // Sampling/rounding are shared; legacy retains its historical
+                // channel convention. Only one pixel per 2x2 block supplies chroma.
+#if SCANNER_MODERN
+                // glReadPixels supplies RGBA. The owned core consumes standard
+                // limited-range NV21 (V/Cr first, U/Cb second).
+                const int R = source[0], G = source[1], B = source[2];
+#else
+                const int B = source[0], G = source[1], R = source[2];
+#endif
+                const int Y = ((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
+                luma[x] = static_cast<uint8_t>(Y);
+                if (!(y & 1) && !(x & 1)) {
+#if SCANNER_MODERN
+                    const int V = ((112 * R - 94 * G - 18 * B + 128) >> 8) + 128;
+                    const int U = ((-38 * R - 74 * G + 112 * B + 128) >> 8) + 128;
+#else
+                    const int V = ((-38 * R - 74 * G + 112 * B + 128) >> 8) + 128;
+                    const int U = ((112 * R - 94 * G - 18 * B + 128) >> 8) + 128;
+#endif
+                    // With 8-bit inputs these coefficients are already in [0,255].
+                    *chroma++ = static_cast<uint8_t>(V);
+                    *chroma++ = static_cast<uint8_t>(U);
                 }
-                index++;
             }
         }
         return output;
@@ -245,8 +265,8 @@ namespace oc {
         int w = width / scale;
         int h = height / scale;
         Image* output = new Image(w, h);
-        for (int x = 0; x < w; x++) {
-            for (int y = 0; y < h; y++) {
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
                 int i = (y * scale * width + x * scale) * 4;
                 int o = (y * w + x) * 4;
                 output->data[o + 0] = data[i + 0];
@@ -502,53 +522,79 @@ namespace oc {
     }
 
     void Image::UpsideDown() {
-        unsigned char* temp = new unsigned char[width * height * 4];
-        int i = 0;
-        for (int y = 0; y < height; y++)
-            for (int x = 0; x < width; x++) {
-                int index = ((height - y - 1) * width + x) * 4;
-                temp[i++] = data[index + 0];
-                temp[i++] = data[index + 1];
-                temp[i++] = data[index + 2];
-                temp[i++] = data[index + 3];
+        // Texture upload flips JPGs twice. Swap rows in place so each flip needs
+        // no full-image allocation and existing pixel-buffer pointers stay valid.
+        const size_t rowBytes = static_cast<size_t>(width) * 4;
+        for (int y = 0; y < height / 2; y++) {
+            unsigned char* top = data + static_cast<size_t>(y) * rowBytes;
+            unsigned char* bottom = data + static_cast<size_t>(height - y - 1) * rowBytes;
+            for (size_t x = 0; x < rowBytes; x++) {
+                unsigned char value = top[x];
+                top[x] = bottom[x];
+                bottom[x] = value;
             }
-        delete[] data;
-        data = temp;
+        }
     }
 
-    void Image::Write(std::string filename) {
+    bool Image::Write(std::string filename) {
         LOGI("Writing %s", filename.c_str());
         std::string ext = filename.substr(filename.size() - 3, filename.size() - 1);
         if (ext.compare("jpg") == 0)
-            WriteJPG(filename);
+            return WriteJPG(filename);
         else if (ext.compare("png") == 0)
-            WritePNG(filename);
+            return WritePNG(filename);
         else if (ext.compare("edg") == 0)
-            WritePNG(filename);
-        else
-            assert(false);
+            return WritePNG(filename);
+        assert(false);
+        return false;
     }
 
-    void Image::ReadJPG(std::string filename) {
+    bool Image::ReadJPG(std::string filename) {
         //get file size
         temp = fopen(filename.c_str(), "rb");
-        fseek(temp, 0, SEEK_END);
-        unsigned long size = (unsigned long) ftell(temp);
+        if (!temp) return false;
+        if (fseek(temp, 0, SEEK_END) != 0) {
+            fclose(temp);
+            return false;
+        }
+        long fileSize = ftell(temp);
+        if ((fileSize <= 0) || (fileSize > 256L * 1024L * 1024L)) {
+            fclose(temp);
+            return false;
+        }
+        unsigned long size = (unsigned long) fileSize;
         rewind(temp);
 
         //read compressed data
         unsigned char* src = new unsigned char[size];
-        fread(src, 1, size, temp);
+        if (fread(src, 1, size, temp) != size) {
+            delete[] src;
+            fclose(temp);
+            return false;
+        }
         fclose(temp);
 
         //read header of compressed data
         int sub;
-        tjDecompressHeader2(jpegD, src, size, &width, &height, &sub);
+        if ((tjDecompressHeader2(jpegD, src, size, &width, &height, &sub) != 0)
+                || (width <= 0) || (height <= 0) || (width > 8192) || (height > 8192)) {
+            width = height = 0;
+            delete[] src;
+            return false;
+        }
         data = new unsigned char[width * height * 4];
 
         //decompress data
-        tjDecompress2(jpegD, src, size, data, width, 0, height, TJPF_RGBA, TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE | TJFLAG_BOTTOMUP);
+        if (tjDecompress2(jpegD, src, size, data, width, 0, height, TJPF_RGBA,
+                          TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE | TJFLAG_BOTTOMUP) != 0) {
+            delete[] data;
+            data = nullptr;
+            width = height = 0;
+            delete[] src;
+            return false;
+        }
         delete[] src;
+        return true;
     }
 
     void Image::ReadPNG(std::string filename) {
@@ -623,27 +669,51 @@ namespace oc {
         fclose(temp);
     }
 
-    void Image::WriteJPG(std::string filename) {
+    bool Image::WriteJPG(std::string filename) {
         //compress data
         long unsigned int size = 0;
         unsigned char* dst = NULL;
-        tjCompress2(jpegC, data, width, 0, height, TJPF_RGBA, &dst, &size, TJSAMP_444, JPEG_QUALITY, TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE | TJFLAG_BOTTOMUP);
+        bool success = tjCompress2(jpegC, data, width, 0, height, TJPF_RGBA, &dst, &size,
+                                   TJSAMP_444, JPEG_QUALITY,
+                                   TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE | TJFLAG_BOTTOMUP) == 0;
 
         //write data into file
         temp = fopen(filename.c_str(), "wb");
-        fwrite(dst, 1, size, temp);
-        fclose(temp);
+        success = success && temp && (fwrite(dst, 1, size, temp) == size);
+        if (temp) success = (fclose(temp) == 0) && success;
         tjFree(dst);
+        return success;
     }
 
-    void Image::WritePNG(std::string filename) {
+    bool Image::WritePNG(std::string filename) {
         // Open file for writing (binary mode)
         temp = fopen(filename.c_str(), "wb");
+        if (!temp) return false;
 
         // init PNG library
         png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+        if (!png_ptr) {
+            fclose(temp);
+            return false;
+        }
         png_infop info_ptr = png_create_info_struct(png_ptr);
-        setjmp(png_jmpbuf(png_ptr));
+        if (!info_ptr) {
+            png_destroy_write_struct(&png_ptr, NULL);
+            fclose(temp);
+            return false;
+        }
+        png_bytep row = (png_bytep) malloc(4 * width * sizeof(png_byte));
+        if (!row) {
+            png_destroy_write_struct(&png_ptr, &info_ptr);
+            fclose(temp);
+            return false;
+        }
+        if (setjmp(png_jmpbuf(png_ptr))) {
+            free(row);
+            png_destroy_write_struct(&png_ptr, &info_ptr);
+            fclose(temp);
+            return false;
+        }
         png_init_io(png_ptr, temp);
         png_set_IHDR(png_ptr, info_ptr, (png_uint_32) width, (png_uint_32) height,
                      8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
@@ -651,7 +721,6 @@ namespace oc {
         png_write_info(png_ptr, info_ptr);
 
         // write image data
-        png_bytep row = (png_bytep) malloc(4 * width * sizeof(png_byte));
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 row[x * 4 + 0] = data[(y * width + x) * 4 + 0];
@@ -664,36 +733,57 @@ namespace oc {
         png_write_end(png_ptr, NULL);
 
         /// close all
-        if (temp != NULL) fclose(temp);
-        if (info_ptr != NULL) png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
-        if (png_ptr != NULL) png_destroy_write_struct(&png_ptr, (png_infopp)NULL);
-        if (row != NULL) free(row);
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        free(row);
+        bool success = fclose(temp) == 0;
+        return success;
     }
 
-    void Image::JPG2YUV(std::string filename, unsigned char* data, int width, int height) {
-        //get file size
-        temp = fopen(filename.c_str(), "rb");
-        fseek(temp, 0, SEEK_END);
-        int size = (int) ftell(temp);
-        rewind(temp);
-
-        //read compressed data
-        unsigned char* src = new unsigned char[size];
-        fread(src, 1, (size_t) size, temp);
-        fclose(temp);
-
-        //decompress data
-        int offset, offset2, x;
-        tjDecompressToYUV2(jpegD, src, (unsigned long) size, data, width, 4, height, TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE);
-        size = width * height;
-        for (unsigned int y = 0; y < height / 2; y++) {
-            offset = size + y * width;
-            offset2 = size + y * 2 * width;
-            memcpy(data + offset, data + offset2, (size_t) width);
-            for (x = 0; x < width; x += 2)
-                data[offset + x] = data[size + offset2 + x];
+    bool Image::JPG2YUV(std::string filename, unsigned char* data, int width, int height) {
+        if (!data || width <= 0 || height <= 0 || width > 8192 || height > 8192
+                || (width & 1) || (height & 1)) return false;
+        // Local ownership: PNG and other JPEG operations use separate legacy globals.
+        struct Input {
+            FILE* file;
+            tjhandle decoder;
+            Input() : file(nullptr), decoder(nullptr) {}
+            ~Input() { if (file) fclose(file); if (decoder) tjDestroy(decoder); }
+        } input;
+        input.file = fopen(filename.c_str(), "rb");
+        if (!input.file || fseek(input.file, 0, SEEK_END) != 0) return false;
+        long size = ftell(input.file);
+        if (size <= 0 || size > 256L * 1024 * 1024 || fseek(input.file, 0, SEEK_SET) != 0) return false;
+        try {
+            std::vector<unsigned char> src(static_cast<size_t>(size));
+            if (fread(src.data(), 1, src.size(), input.file) != src.size() || ferror(input.file)) return false;
+            int closeResult = fclose(input.file);
+            input.file = nullptr;
+            if (closeResult != 0) return false;
+            input.decoder = tjInitDecompress();
+            if (!input.decoder) return false;
+            int w = 0, h = 0, sampling = -1, colorspace = -1;
+            if (tjDecompressHeader3(input.decoder, src.data(), static_cast<unsigned long>(size),
+                                    &w, &h, &sampling, &colorspace) != 0
+                    || w != width || h != height || sampling != TJSAMP_444 || colorspace != TJCS_YCbCr) return false;
+            const size_t pixels = static_cast<size_t>(width) * height;
+            std::vector<unsigned char> planes(pixels * 3);
+            // pad=1 also handles even widths not divisible by four.
+            if (tjDecompressToYUV2(input.decoder, src.data(), static_cast<unsigned long>(size),
+                    planes.data(), width, 1, height, TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE) != 0) return false;
+            memcpy(data, planes.data(), pixels);
+            for (int y = 0; y < height / 2; ++y) {
+                for (int x = 0; x < width; x += 2) {
+                    const size_t source = static_cast<size_t>(2 * y) * width + x;
+                    const size_t target = pixels + static_cast<size_t>(y) * width + x;
+                    // Preserve legacy app-generated 444: Cr at even x, Cb at odd x.
+                    data[target] = planes[pixels * 2 + source];
+                    data[target + 1] = planes[pixels + source + 1];
+                }
+            }
+            return true;
+        } catch (...) {
+            return false;
         }
-        delete[] src;
     }
 
     void Image::YUV2JPG(unsigned char *data, int width, int height, std::string filename, bool gray) {

@@ -46,7 +46,6 @@ private:
     //projecting frames into textures
     void ColorMapping(glm::ivec4* dx, glm::ivec4* dy);
     void ColorMappingBlur(glm::ivec4* dx, glm::ivec4* dy, glm::ivec4* nx, glm::ivec4* ny);
-    void ColorMappingDebug(std::string filename, glm::ivec4* dx, glm::ivec4* dy);
     void DrawTexels(glm::ivec4* dx, glm::ivec4* dy);
     virtual void Process(unsigned long& index, int &x1, int &x2, int &y, glm::dvec3 &z1, glm::dvec3 &z2);
 

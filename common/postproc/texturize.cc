@@ -149,7 +149,6 @@ void Texturize::ProjectFrames(bool edges) {
             if (!edges) {
                 ColorMapping(dx, dy);
                 ColorMappingBlur(dx, dy, nx, ny);
-                //ColorMappingDebug(dataset->GetFileName(it->first, ".png"), dx, dy);
             }
             DrawTexels(dx, dy);
             texels.clear();
@@ -355,21 +354,6 @@ void Texturize::ColorMappingBlur(glm::ivec4* dx, glm::ivec4* dy, glm::ivec4* nx,
     }
     memcpy(dy, ny, width * sizeof(glm::ivec4));
     memcpy(dx, nx, height * sizeof(glm::ivec4));
-}
-
-void Texturize::ColorMappingDebug(std::string filename, glm::ivec4* dx, glm::ivec4* dy) {
-    Image output(width, height);
-    for (int x = 0; x < width; x++) {
-        for (int y = 0; y < height; y++) {
-            glm::ivec4 color = (dx[y] + dy[x]) / 2 + 128;
-            color.r = glm::clamp(color.r, 0, 255);
-            color.g = glm::clamp(color.g, 0, 255);
-            color.b = glm::clamp(color.b, 0, 255);
-            color.a = 255;
-            output.DrawPixel(x, y, color);
-        }
-    }
-    output.Write(filename);
 }
 
 void Texturize::DrawTexels(glm::ivec4* dx, glm::ivec4* dy) {

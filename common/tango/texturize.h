@@ -9,15 +9,20 @@ namespace oc {
     class TangoTexturize {
     public:
         TangoTexturize();
-        void Add(Image* image, double timestamp, Tango3DR_CameraCalibration* camera, std::vector<glm::mat4> matrix, Dataset* dataset);
-        void ApplyDistortion(Tango3DR_CameraCalibration& camera, std::vector<float>& frame_distortion);
-        void ApplyFrames(Dataset* dataset);
-        void ApplyFrames(Dataset* dataset, std::vector<int> frames);
+        ~TangoTexturize();
+        TangoTexturize(const TangoTexturize&) = delete;
+        TangoTexturize& operator=(const TangoTexturize&) = delete;
+        bool Add(Image* image, double timestamp, Tango3DR_CameraCalibration* camera, std::vector<glm::mat4> matrix, Dataset* dataset);
+        bool Commit(Tango3DR_CameraCalibration* camera, Dataset* dataset);
+        void ApplyDistortion(Tango3DR_CameraCalibration& camera, const std::vector<float>& frame_distortion);
+        bool ApplyFrames(Dataset* dataset);
+        bool ApplyFrames(Dataset* dataset, const std::vector<int>& frames);
         Tango3DR_CameraCalibration Camera() { return camera; }
-        void Clear(Dataset* dataset);
-        void CreateContext(Tango3DR_Mesh* mesh, bool verbose, bool ignoreConfig);
+        bool Clear(Dataset* dataset);
+        bool CreateContext(Tango3DR_Mesh* mesh, bool verbose, bool ignoreConfig);
+        bool ResetContext();
         Tango3DR_TexturingContext Context() { return context; }
-        void DeleteLast(Dataset* dataset);
+        bool DeleteLast(Dataset* dataset);
         Tango3DR_Pose Extract3DRPose(glm::mat4 matrix);
         std::string GetEvent() { return event; }
         int GetLatestIndex(Dataset* dataset);
@@ -25,12 +30,13 @@ namespace oc {
         int GetWidth() { return width; }
         int GetHeight() { return height; }
         bool Init(std::string filename, bool verbose, bool ignoreConfig);
-        void Process(std::string filename, bool verbose = true, bool poisson = false);
-        void SetCalibration(Tango3DR_ReconstructionContext context, Dataset* dataset, int scale = 1);
+        bool Process(std::string filename, bool verbose = true, bool poisson = false);
+        bool SetCalibration(Tango3DR_ReconstructionContext context, Dataset* dataset, int scale = 1);
         void SetDistortion(bool on) { useDistortion = on; }
         void SetEvent(std::string value) { event = value; }
         void SetTextureParams(int detail, int res, int count) { meshSimplification = detail, textureResolution = res; textureCount = count; }
-        void UpdatePoses(Dataset* dataset);
+        bool Truncate(int count, Dataset* dataset);
+        bool UpdatePoses(Dataset* dataset);
 
     private:
         void ScaleMesh(Tango3DR_Mesh* mesh, float s);

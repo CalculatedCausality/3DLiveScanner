@@ -25,12 +25,13 @@ namespace oc {
 
         void Clear();
         void SetName(std::string value) { name = value; }
+        void SwapName(std::string& value) noexcept { name.swap(value); }
         void SetTexture(long value) { texture = value; }
         void Turn();
         void UpdateTexture();
         void UpdateYUV(unsigned char* src0, unsigned char* src1, int w, int h, int scale);
         void UpsideDown();
-        void Write(std::string filename);
+        bool Write(std::string filename);
 
         void DrawCircle(int cx, int cy, int radius, glm::ivec4 color);
         void DrawLine(int x1, int y1, int x2, int y2, glm::ivec4 color);
@@ -41,21 +42,23 @@ namespace oc {
         std::string GetExtension();
         int GetWidth() { return width; }
         int GetHeight() { return height; }
+        bool IsValid() { return data && (width > 0) && (height > 0); }
         unsigned char* GetData() { return data; }
         std::string GetName() { return name; }
         long GetTexture() { return texture; }
 
-        static void JPG2YUV(std::string filename, unsigned char* data, int width, int height);
+        static bool JPG2YUV(std::string filename, unsigned char* data, int width, int height);
+        static void AbandonTextures();
         static void YUV2JPG(unsigned char* data, int width, int height, std::string filename, bool gray);
         static std::vector<unsigned int> TexturesToDelete();
 
     private:
         bool ClipTest(double p, double q, double &t1, double &t2);
 
-        void ReadJPG(std::string filename);
+        bool ReadJPG(std::string filename);
         void ReadPNG(std::string filename);
-        void WriteJPG(std::string filename);
-        void WritePNG(std::string filename);
+        bool WriteJPG(std::string filename);
+        bool WritePNG(std::string filename);
 
         int instances;
         int width;

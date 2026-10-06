@@ -7,55 +7,58 @@
 #include <data/image.h>
 #include <data/mesh.h>
 #include <gl/renderer.h>
+#include <arcore/backend.h>
 #include <media/NdkImageReader.h>
 
 namespace oc {
 
-    class AREngine {
+    class AREngine : public ARBackend {
     public:
         AREngine(void *env, void *context, bool depthCamera = true, bool faceMode = false, bool flashlight = false);
 
         ~AREngine();
 
-        void Clear(bool detach);
+        void Clear(bool detach) override;
 
-        void OnPause();
+        void OnPause() override;
 
-        void OnResume();
+        void OnResume() override;
 
-        void OnDisplayGeometryChanged(int display_rotation, int width, int height);
+        void OnDisplayGeometryChanged(int display_rotation, int width, int height) override;
 
-        void Configure(void* session, void* frame);
+        void Configure(void* session, void* frame) override;
 
-        float CountFrameError();
+        float CountFrameError() override;
 
-        bool Process(bool update = true);
+        bool Process(bool update = true) override;
 
-        std::vector<glm::vec3> GetActiveAnchors();
+        std::vector<glm::vec3> GetActiveAnchors() override;
 
-        std::vector<float> GetDistortion();
+        std::vector<float> GetDistortion() override;
 
-        glm::vec3 HitTest(int x, int y);
+        glm::vec3 HitTest(int x, int y) override;
 
-        Mesh GetFace(glm::mat4 matrix) { UpdateFace(matrix); return face_mesh; };
+        Mesh GetFace(glm::mat4 matrix) override { UpdateFace(matrix); return face_mesh; };
 
-        std::vector<glm::vec4> GetPointCloud() { UpdateFeaturePoints(); return points; }
+        std::vector<glm::vec4> GetPointCloud() override { UpdateFeaturePoints(); return points; }
 
-        glm::mat4 GetProjection() { return projection_mat; }
+        glm::mat4 GetProjection() override { return projection_mat; }
 
-        glm::mat4 GetView() { return view_mat; }
+        glm::mat4 GetView() override { return view_mat; }
 
-        bool HasCoordinateSystem() { return has_coordinate_system_; }
+        bool HasCoordinateSystem() override { return has_coordinate_system_; }
 
-        void RenderCamera(ARCoreCamera::Effect effect = ARCoreCamera::GRAYSCALE, int scale = 1);
+        void RemoveFaceDetails() override;
 
-        void SetNVScheme(ARCoreCamera::NightVisionScheme s) { camera.SetNVScheme(s); }
+        void RenderCamera(ARCoreCamera::Effect effect = ARCoreCamera::GRAYSCALE, int scale = 1) override;
 
-        void SetOffset(float value) { offset = value; }
+        void SetNVScheme(ARCoreCamera::NightVisionScheme s) override { camera.SetNVScheme(s); }
 
-        void SetResolution(float res) { resolution = res; }
+        void SetOffset(float value) override { offset = value; }
 
-        Image* GetDepthMap(bool confidence, bool increasing, int s = 1);
+        void SetResolution(float res) override { resolution = res; }
+
+        Image* GetDepthMap(bool confidence, bool increasing, int s = 1) override;
     private:
         bool UpdateAnchor();
 
@@ -69,8 +72,9 @@ namespace oc {
         Mesh face_mesh;
 
         ARCoreCamera camera;
-        glm::mat4 view_mat;
-        glm::mat4 projection_mat;
+        glm::mat4 view_mat = glm::mat4(1);
+        glm::mat4 projection_mat = glm::mat4(1);
+        bool frame_valid_ = false;
 
         bool face_mode_;
         bool has_coordinate_system_;

@@ -2,6 +2,7 @@
 #define GL_GLSL_H
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "data/image.h"
 #include "gl/opengl.h"
@@ -18,6 +19,7 @@ namespace oc {
         GLSL(std::string vert, std::string frag, std::string extension = "");
 
         ~GLSL();
+        void AbandonGlContext();
 
         /**
          * @brief it sends geometry into GPU
@@ -93,9 +95,11 @@ namespace oc {
          */
         void UniformVec3(const char* name, float x, float y, float z);
 
-        static GLuint Image2GLTexture(Image* img);
+        static GLuint Image2GLTexture(Image* img, bool mipmaps = true);
 
     private:
+        GLint UniformLocation(const char* name);
+
         unsigned int id;          ///< Shader id
         unsigned int shader_vp;   ///< Vertex shader
         unsigned int shader_fp;   ///< Fragment shader
@@ -103,6 +107,7 @@ namespace oc {
         int attribute_v_coord;    ///< Pointer to coords on GPU
         int attribute_v_normal;   ///< Pointer to normals on GPU
         int attribute_v_color;    ///< Pointer to colors on GPU
+        std::unordered_map<std::string, GLint> uniform_locations;
     };
 }
 #endif

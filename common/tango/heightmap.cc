@@ -1,6 +1,7 @@
 #include <data/dataset.h>
 #include <data/file3d.h>
 #include <tango/heightmap.h>
+#include <cmath>
 #include <sstream>
 
 //threshold where edges are connected [centimeters]
@@ -92,7 +93,7 @@ void Heightmap::Clear()
     max.z =-bigNumber;
 }
 
-void Heightmap::ConvertFrame(Tango3DR_Vector4* points, int size, std::vector<glm::mat4> pose)
+void Heightmap::ConvertFrame(Tango3DR_Vector4* points, int size, const std::vector<glm::mat4>& pose)
 {
     //convert point cloud into world space and colorize it
     Mesh pcl;
@@ -515,7 +516,7 @@ void Heightmap::UpdateDiffs(std::map<HeightmapPoint, bool> &toUpdate) {
             for (r.x = p.x - 1; r.x <= p.x + 1; r.x++) {
                 for (r.z = p.z - 1; r.z <= p.z + 1; r.z++) {
                     if (heightmap.find(r) != heightmap.end()) {
-                        diff = glm::max(diff, fabs(heightmap[r] - value));
+                        diff = glm::max(diff, std::fabs(heightmap[r] - value));
                     }
                 }
             }

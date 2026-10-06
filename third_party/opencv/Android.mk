@@ -17,11 +17,6 @@ LOCAL_SRC_FILES := libs/arm64-v8a/libittnotify.a
 include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := libjpeg
-LOCAL_SRC_FILES := libs/arm64-v8a/liblibjpeg-turbo.a
-include $(PREBUILT_STATIC_LIBRARY)
-
-include $(CLEAR_VARS)
 LOCAL_MODULE := libtbb
 LOCAL_SRC_FILES := libs/arm64-v8a/libtbb.a
 include $(PREBUILT_STATIC_LIBRARY)
@@ -44,7 +39,7 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_MODULE := opencv_core
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
-LOCAL_STATIC_LIBRARIES := libcpufeatures libtegra_hal libittnotify libilmimf libjpeg libtbb libtiff libwebp
+LOCAL_STATIC_LIBRARIES := libcpufeatures libtegra_hal libittnotify libilmimf libtbb libtiff libwebp
 LOCAL_SRC_FILES := libs/arm64-v8a/libopencv_core.a
 include $(PREBUILT_STATIC_LIBRARY)
 
@@ -58,17 +53,6 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := opencv_flann
 LOCAL_STATIC_LIBRARIES := opencv_core
 LOCAL_SRC_FILES := libs/arm64-v8a/libopencv_flann.a
-include $(PREBUILT_STATIC_LIBRARY)
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := libopenjp2
-LOCAL_SRC_FILES := libs/arm64-v8a/liblibopenjp2.a
-include $(PREBUILT_STATIC_LIBRARY)
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := opencv_imgcodecs
-LOCAL_STATIC_LIBRARIES := opencv_core opencv_imgproc libopenjp2
-LOCAL_SRC_FILES := libs/arm64-v8a/libopencv_imgcodecs.a
 include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)

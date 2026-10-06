@@ -23,12 +23,24 @@ namespace oc {
     }
 
     GLSL::~GLSL() {
-        glDetachShader(id, shader_vp);
-        glDetachShader(id, shader_fp);
-        glDeleteShader(shader_vp);
-        glDeleteShader(shader_fp);
-        glUseProgram(0);
-        glDeleteProgram(id);
+        if (gl_last_shader == this) {
+            gl_last_shader = 0;
+            if (id) glUseProgram(0);
+        }
+        if (id) {
+            glDetachShader(id, shader_vp);
+            glDetachShader(id, shader_fp);
+            glDeleteShader(shader_vp);
+            glDeleteShader(shader_fp);
+            glDeleteProgram(id);
+        }
+    }
+
+    void GLSL::AbandonGlContext() {
+        if (gl_last_shader == this) gl_last_shader = 0;
+        id = 0;
+        shader_vp = 0;
+        shader_fp = 0;
     }
 
     void GLSL::Attrib(float* vertices, float* normals, float* coords, unsigned int* colors) {
@@ -134,39 +146,51 @@ namespace oc {
     }
 
     void GLSL::UniformFloat(const char* name, float value) {
-        glUniform1f(glGetUniformLocation(id, name), value);
+        glUniform1f(UniformLocation(name), value);
     }
 
     void GLSL::UniformInt(const char* name, int value) {
-        glUniform1i(glGetUniformLocation(id, name), value);
+        glUniform1i(UniformLocation(name), value);
     }
 
     void GLSL::UniformMatrix(const char* name, const float* value) {
-        glUniformMatrix4fv(glGetUniformLocation(id,name),1, GL_FALSE, value);
+        glUniformMatrix4fv(UniformLocation(name),1, GL_FALSE, value);
     }
 
     void GLSL::UniformTexture(const char* name, int value) {
-        glUniform1i(glGetUniformLocation(id, name), value);
+        UniformInt(name, value);
     }
 
     void GLSL::UniformVec3(const char *name, float x, float y, float z) {
-        glUniform3f(glGetUniformLocation(id, name), x, y, z);
+        glUniform3f(UniformLocation(name), x, y, z);
     }
 
-    GLuint GLSL::Image2GLTexture(Image* img) {
+    GLint GLSL::UniformLocation(const char* name) {
+        std::unordered_map<std::string, GLint>::iterator it = uniform_locations.find(name);
+        if (it != uniform_locations.end()) return it->second;
+        GLint location = glGetUniformLocation(id, name);
+        uniform_locations[name] = location;
+        return location;
+    }
+
+    GLuint GLSL::Image2GLTexture(Image* img, bool mipmaps) {
         bool jpg = img->GetExtension().compare("jpg") == 0;
         if (jpg) img->UpsideDown();
+        bool powerOfTwo = (img->GetWidth() > 0) && (img->GetHeight() > 0)
+                && ((img->GetWidth() & (img->GetWidth() - 1)) == 0)
+                && ((img->GetHeight() & (img->GetHeight() - 1)) == 0);
+        bool useMipmaps = mipmaps && powerOfTwo;
 
         GLuint textureID;
         glGenTextures(1, &textureID);
         glBindTexture(GL_TEXTURE_2D, textureID);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, useMipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
         glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, useMipmaps ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, useMipmaps ? GL_REPEAT : GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img->GetWidth(), img->GetHeight(),
                      0, GL_RGBA, GL_UNSIGNED_BYTE, img->GetData());
-        glGenerateMipmap(GL_TEXTURE_2D);
+        if (useMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
 
         if (jpg) img->UpsideDown();
         return textureID;

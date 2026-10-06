@@ -11,6 +11,7 @@ namespace oc {
     public:
         Scene();
         ~Scene();
+        void AbandonGlContext();
         void BindDepthShader();
         void BindMixedShader();
         void CustomRender(glm::mat4 matrix);

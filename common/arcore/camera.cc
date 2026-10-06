@@ -114,10 +114,12 @@ namespace oc {
         Draw(effect, w, h);
     }
 
+#if !SCANNER_MODERN
     void ARCoreCamera::DrawAREngine(const HwArSession *session, const HwArFrame *frame, Effect effect, int w, int h) {
         InitAREngine(session, frame);
         Draw(effect, w, h);
     }
+#endif
 
     void ARCoreCamera::InitARCore(const ArSession *session, const ArFrame *frame) {
         int32_t geometry_changed = 0;
@@ -133,6 +135,7 @@ namespace oc {
         }
     }
 
+#if !SCANNER_MODERN
     void ARCoreCamera::InitAREngine(const HwArSession *session, const HwArFrame *frame) {
         int32_t geometry_changed = 0;
         HwArFrame_getDisplayGeometryChanged(session, frame, &geometry_changed);
@@ -146,6 +149,8 @@ namespace oc {
             uvs_initialized_ = true;
         }
     }
+
+#endif
 
     void ARCoreCamera::Draw(Effect effect, int w, int h) {
 
@@ -177,7 +182,9 @@ namespace oc {
     }
 
     glm::vec2 ARCoreCamera::Transform(int x, int y, float w, float h) {
-        if (!aabb_initialized_) {
+        if (!aabb_initialized_ || aabb_width_ != w || aabb_height_ != h) {
+            minX = minY = 9999;
+            maxX = maxY = -9999;
             for (int i = 0; i < 8; i += 2) {
                 minX = glm::min(minX, transformed_uvs_[i] * w);
                 maxX = glm::max(maxX, transformed_uvs_[i] * w);
@@ -188,6 +195,8 @@ namespace oc {
             }
             dx = Axis(glm::vec2(transformed_uvs_[2] - transformed_uvs_[0], transformed_uvs_[3] - transformed_uvs_[1]));
             dy = Axis(glm::vec2(transformed_uvs_[6] - transformed_uvs_[2], transformed_uvs_[7] - transformed_uvs_[3]));
+            aabb_width_ = w;
+            aabb_height_ = h;
             aabb_initialized_ = true;
         }
 
