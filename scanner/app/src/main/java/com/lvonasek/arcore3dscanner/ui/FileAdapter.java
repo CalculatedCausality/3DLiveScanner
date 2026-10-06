@@ -1,16 +1,14 @@
 package com.lvonasek.arcore3dscanner.ui;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.os.Build;
 import android.preference.PreferenceManager;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -29,16 +27,13 @@ import com.lvonasek.arcore3dscanner.BuildConfig;
 import com.lvonasek.arcore3dscanner.R;
 import com.lvonasek.arcore3dscanner.main.Exporter;
 import com.lvonasek.arcore3dscanner.main.Main;
-import com.lvonasek.arcore3dscanner.sketchfab.OAuth;
+import com.lvonasek.arcore3dscanner.sharing.ModelSharing;
 import com.lvonasek.utils.GestureDetector;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Locale;
 import java.util.Scanner;
 
@@ -49,8 +44,9 @@ class FileAdapter extends BaseAdapter
   private ArrayList<Integer> mSelected;
   private GestureDetector mGesture;
   private float mColumns;
+  private boolean mArchiveSharing;
 
-  private final HashMap<String, Drawable> mIcons = new HashMap<>();
+  private final ThumbnailLoader mThumbnails = new ThumbnailLoader();
   private final ArrayList<String> mItems = new ArrayList<>();
 
   FileAdapter(FileManager context, int columns)
@@ -119,8 +115,10 @@ class FileAdapter extends BaseAdapter
   @Override
   public View getView(final int index, View view, ViewGroup viewGroup)
   {
-    LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-    view = inflater.inflate(R.layout.view_item, null, true);
+    if (view == null) {
+      LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+      view = inflater.inflate(R.layout.view_item, viewGroup, false);
+    }
     if (getCount() <= index) {
       return view;
     }
@@ -146,22 +144,20 @@ class FileAdapter extends BaseAdapter
         break;
       }
     }
-    synchronized (mIcons) {
-      if (mIcons.containsKey(key)) {
-        icon.setImageDrawable(mIcons.get(key));
-      }
-    }
-    loadIcon(key, icon);
+    mThumbnails.bind(icon, key.endsWith(Exporter.EXT_DATASET) || key.endsWith(Exporter.EXT_OBJ)
+            ? new File(getPath(), key) : null);
 
     //set extension
-    View extension = view.findViewById(R.id.extension);
-    extension.setVisibility(key.endsWith(Exporter.EXT_DATASET) ? View.VISIBLE : view.GONE);
+    TextView extension = view.findViewById(R.id.extension);
+    int type = !hasExtension ? R.string.model_type_folder
+            : (key.endsWith(Exporter.EXT_DATASET) ? R.string.model_type_dataset
+            : (key.endsWith(Exporter.EXT_PLY) ? R.string.model_type_points : R.string.model_type_mesh));
+    extension.setText(type);
+    view.setTag(mContext.getString(R.string.model_accessibility, name.getText(), extension.getText()));
 
     //set selection
     View selection = view.findViewById(R.id.selection);
-    if (mSelected.contains(index)) {
-      selection.setVisibility(View.VISIBLE);
-    }
+    updateSelection(selection, mSelected.contains(index));
 
     //set open action
     boolean finalHasExtension = hasExtension;
@@ -173,11 +169,12 @@ class FileAdapter extends BaseAdapter
 
       if (!finalHasExtension) {
         if (hasParent() && (index == 0)) {
-          mPath = new File(mPath).getParentFile().getAbsolutePath();
+          toParent();
         } else {
+          mThumbnails.clear();
           mPath = new File(mPath, key).getAbsolutePath();
+          mContext.refreshUI();
         }
-        mContext.refreshUI();
       } else if (key.endsWith(Exporter.EXT_DATASET)) {
         startPostprocess(key);
       } else {
@@ -202,74 +199,13 @@ class FileAdapter extends BaseAdapter
   }
 
   public void toParent() {
+    mThumbnails.clear();
     mPath = new File(mPath).getParentFile().getAbsolutePath();
     mContext.refreshUI();
   }
 
-  private void loadIcon(String name, ImageView view) {
-    new Thread(() -> {
-      try {
-        File thumbFile = null;
-        if (name.endsWith(Exporter.EXT_DATASET)) {
-          thumbFile = new File(getPath(), name + "/thumbnail.jpg");
-          if (!thumbFile.exists()) {
-            File file = new File(getPath(), name + "/00000000.jpg");
-            if (file.exists()) {
-              Bitmap originalBitmap = BitmapFactory.decodeFile(file.getAbsolutePath());;
-              Bitmap resizedBitmap = Bitmap.createScaledBitmap(originalBitmap, 180, 320, false);
-              try (FileOutputStream out = new FileOutputStream(thumbFile.getAbsolutePath())) {
-                resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 75, out);
-              } catch (Exception e) {
-                e.printStackTrace();
-              }
-            }
-          }
-        } else if (name.endsWith(Exporter.EXT_OBJ)) {
-          thumbFile = new File(getPath(), name + "/thumbnail.jpg");
-          if (!thumbFile.exists()) {
-            File f = new File(getPath(), name);
-            if (f.exists()) {
-              File model = AbstractActivity.getModel(f);
-              String mtl = Exporter.getMtlResource(model.getAbsolutePath());
-              File file = new File(model.getParent(), mtl + ".png");
-              if (file.exists()) {
-                Bitmap originalBitmap = BitmapFactory.decodeFile(file.getAbsolutePath());;
-                Bitmap resizedBitmap = Bitmap.createScaledBitmap(originalBitmap, 256, 256, false);
-                try (FileOutputStream out = new FileOutputStream(thumbFile.getAbsolutePath())) {
-                  resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 75, out);
-                } catch (Exception e) {
-                  e.printStackTrace();
-                }
-              }
-            }
-          }
-        }
-        if (thumbFile != null && thumbFile.exists() && thumbFile.length() >= 1024) {
-          Bitmap bitmap = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
-          int w = bitmap.getWidth();
-          int h = bitmap.getHeight();
-          int o = (Math.max(w, h) - Math.min(w, h)) / 2;
-          if (w < h) {
-            bitmap = Bitmap.createBitmap(bitmap, 0, o, w, w);
-          } else if (w > h) {
-            bitmap = Bitmap.createBitmap(bitmap, o, 0, h, h);
-          }
-          if ((bitmap.getWidth() != 256) || (bitmap.getHeight() != 256)) {
-            bitmap = Bitmap.createScaledBitmap(bitmap, 256, 256, true);
-          }
-          Drawable d = new BitmapDrawable(mContext.getResources(), bitmap);
-          synchronized (mIcons) {
-            if (mIcons.containsKey(name)) {
-              mIcons.remove(name);
-            }
-            mIcons.put(name, d);
-          }
-          mContext.runOnUiThread(() -> view.setImageDrawable(d));
-        }
-      } catch (Exception e) {
-        e.printStackTrace();
-      }
-    }).start();
+  public void close() {
+    mThumbnails.close();
   }
 
   public String getPath() {
@@ -277,15 +213,6 @@ class FileAdapter extends BaseAdapter
   }
 
   private void startPostprocess(String key) {
-
-    AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
-    builder.setView(R.layout.dialog_scan);
-    Dialog dialog = builder.create();
-    dialog.getWindow().setBackgroundDrawable(mContext.getDrawable(R.drawable.background_dialog));
-    dialog.show();
-    ((TextView)dialog.findViewById(R.id.name)).setText(R.string.export);
-
-
     ArrayList<Drawable> icons = new ArrayList<>();
     ArrayList<String> values = new ArrayList<>();
     values.add(mContext.getString(R.string.export_model));
@@ -296,21 +223,13 @@ class FileAdapter extends BaseAdapter
     icons.add(mContext.getDrawable(R.drawable.ic_type_pointcloud));
 
     SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(mContext);
-    ArrayAdapterWithIcons adapter = new ArrayAdapterWithIcons(mContext, values, icons);
+    Dialog dialog = CommonDialogs.showScanChoices(mContext, values, icons, R.string.export);
     GridView list = dialog.findViewById(R.id.list);
-    list.setAdapter(adapter);
-    list.setOnTouchListener((v, event) -> event.getAction() == MotionEvent.ACTION_MOVE);
     list.setOnItemClickListener((adapterView, view, index, l) -> {
-      String mode = values.get(index);
       SharedPreferences.Editor e = pref.edit();
       e.putBoolean(mContext.getString(R.string.pref_later), true);
-      if (mode.compareTo(mContext.getString(R.string.export_floorplan)) == 0) {
-        e.putString(mContext.getString(R.string.pref_mode), "exp_floorplan");
-      } else if (mode.compareTo(mContext.getString(R.string.export_pointcloud)) == 0) {
-        e.putString(mContext.getString(R.string.pref_mode), "exp_pointcloud");
-      } else if (mode.compareTo(mContext.getString(R.string.export_model)) == 0) {
-        e.putString(mContext.getString(R.string.pref_mode), "realtime");
-      }
+      String[] modes = {"realtime", "exp_floorplan", "exp_pointcloud"};
+      e.putString(mContext.getString(R.string.pref_mode), modes[index]);
       e.commit();
 
       File file = new File(getPath(), key);
@@ -322,6 +241,7 @@ class FileAdapter extends BaseAdapter
   }
 
   public void update() {
+    mThumbnails.clear();
     mItems.clear();
     mSelected.clear();
     mContext.setOptions(mSelected.size());
@@ -335,37 +255,21 @@ class FileAdapter extends BaseAdapter
       Arrays.sort(files);
 
       ArrayList<String> folders = new ArrayList<>();
-      for (String s : files) {
-        if (s.contains(AbstractActivity.DELETE_POSTFIX)) {
-          continue;
-        }
-        File f = new File(getPath(), s);
-        if (f.isDirectory()) {
-          if (f.getAbsolutePath().compareTo(mContext.getTempPath().getAbsolutePath()) != 0) {
-            if (Exporter.isFolder(s)) {
-              folders.add(s);
-            }
-          }
-        }
-      }
-
       ArrayList<String> data = new ArrayList<>();
       for (String s : files) {
         if (s.contains(AbstractActivity.DELETE_POSTFIX)) {
           continue;
         }
-        if (Exporter.isFolder(s)) {
+        File f = new File(getPath(), s);
+        if (!f.isDirectory() || f.getAbsolutePath().equals(mContext.getTempPath().getAbsolutePath())) {
           continue;
         }
-        File f = new File(getPath(), s);
-        if (f.isDirectory()) {
-          if (f.getAbsolutePath().compareTo(mContext.getTempPath().getAbsolutePath()) != 0) {
-            if (s.startsWith("20")) {
-              data.add(0, s);
-            } else {
-              data.add(s);
-            }
-          }
+        if (Exporter.isFolder(s)) {
+          folders.add(s);
+        } else if (s.startsWith("20")) {
+          data.add(0, s);
+        } else {
+          data.add(s);
         }
       }
 
@@ -388,11 +292,13 @@ class FileAdapter extends BaseAdapter
     String key = (String)getItem(mSelected.get(0));
     File gpsFile = new File(new File(getPath(), key), "position.txt");
     try {
-      Scanner sc = new Scanner(new FileInputStream(gpsFile.getAbsolutePath()));
-      sc.useLocale(Locale.US);
-      String lon = sc.next();
-      String lat = sc.next();
-      sc.close();
+      String lon;
+      String lat;
+      try (Scanner sc = new Scanner(new FileInputStream(gpsFile.getAbsolutePath()))) {
+        sc.useLocale(Locale.US);
+        lon = sc.next();
+        lat = sc.next();
+      }
 
       Uri uri = Uri.parse("geo:" + lat + "," + lon + "");
       Intent intent = new Intent(android.content.Intent.ACTION_VIEW, uri);
@@ -403,10 +309,10 @@ class FileAdapter extends BaseAdapter
   }
 
   public void deleteModel() {
-    AlertDialog.Builder deleteDlg = new AlertDialog.Builder(mContext);
+    AlertDialog.Builder deleteDlg = new MaterialAlertDialogBuilder(mContext);
     deleteDlg.setTitle(mContext.getString(R.string.delete));
     deleteDlg.setMessage(mContext.getString(R.string.continue_question));
-    deleteDlg.setPositiveButton(mContext.getString(android.R.string.ok), (dialogInterface, i) -> {
+    deleteDlg.setPositiveButton(mContext.getString(R.string.delete), (dialogInterface, i) -> {
       for (Integer index : mSelected) {
         String key = (String)getItem(index);
         AbstractActivity.deleteRecursive(new File(getPath(), key));
@@ -415,63 +321,55 @@ class FileAdapter extends BaseAdapter
     });
     deleteDlg.setNegativeButton(mContext.getString(android.R.string.cancel), null);
 
-    AlertDialog d = deleteDlg.create();
-    d.getWindow().setBackgroundDrawable(mContext.getDrawable(R.drawable.background_dialog));
-    d.show();
+    deleteDlg.show();
   }
 
   public void shareModel() {
+    if (mSelected.isEmpty()) return;
     String key = (String)getItem(mSelected.get(0));
-    if (key.length() <= 4) {
-      Toast.makeText(mContext, R.string.invalid_name, Toast.LENGTH_LONG).show();
-    } else if ((key.endsWith(Exporter.EXT_DATASET)) || (key.endsWith(Exporter.EXT_PLY))) {
-      mContext.showProgress();
-      new Thread(() -> {
-        final String zip = Exporter.compressModel(new File(getPath(), key));
-        mContext.runOnUiThread(() -> {
-          Intent intent = new Intent(Intent.ACTION_SEND);
-          intent.setType("application/zip");
-          intent.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(mContext, BuildConfig.APPLICATION_ID + ".provider", new File(zip)));
-          mContext.startActivity(Intent.createChooser(intent, mContext.getString(R.string.share_via)));
-        });
-      }).start();
+    final File selected = new File(getPath(), key);
+    if (key.endsWith(Exporter.EXT_DATASET)) {
+      new MaterialAlertDialogBuilder(mContext)
+          .setTitle(R.string.share_model_title)
+          .setItems(new CharSequence[]{mContext.getString(R.string.share_dataset_export),
+                  mContext.getString(R.string.share_dataset_archive)}, (dialog, which) -> {
+            if (which == 0) startPostprocess(key);
+            else shareDatasetArchive(selected);
+          }).show();
     } else {
-      AlertDialog.Builder dialog = new AlertDialog.Builder(mContext);
-      dialog.setTitle(R.string.share_via);
-      dialog.setItems(R.array.shares, (dialog1, which) -> {
-        mContext.showProgress();
-        new Thread(() -> {
-          File file = new File(getPath(), key);
-          final String zip = which == 1 ? AbstractActivity.getModel(file).getAbsolutePath() : Exporter.compressModel(file);
-          mContext.runOnUiThread(() -> {
-            Intent intent;
-            switch (which) {
-              case 0: //intent
-                intent = new Intent(Intent.ACTION_SEND);
-                intent.setType("application/zip");
-                intent.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(mContext, BuildConfig.APPLICATION_ID + ".provider", new File(zip)));
-                mContext.startActivity(Intent.createChooser(intent, mContext.getString(R.string.share_via)));
-                break;
-              case 1: //online
-                intent = new Intent(mContext, Uploader.class);
-                intent.putExtra(AbstractActivity.FILE_KEY, zip);
-                intent.putExtra(AbstractActivity.URL_KEY, "https://anyconv.com/mesh-converter/");
-                mContext.startActivity(intent);
-                break;
-              case 2: //sketchfab
-                intent = new Intent(mContext, OAuth.class);
-                intent.putExtra(AbstractActivity.FILE_KEY, zip);
-                mContext.startActivity(intent);
-                break;
-            }
-            mContext.refreshUI();
-          });
-        }).start();
-      });
-      AlertDialog d = dialog.create();
-      d.getWindow().setBackgroundDrawable(mContext.getDrawable(R.drawable.background_dialog));
-      d.show();
+      ModelSharing.share(mContext, selected);
     }
+  }
+
+  private void shareDatasetArchive(File selected) {
+    if (mArchiveSharing) return;
+    mArchiveSharing = true;
+    mContext.showProgress();
+    new Thread(() -> {
+      String archive = null;
+      Exception failure = null;
+      try { archive = Exporter.compressModel(selected); }
+      catch (Exception error) { failure = error; }
+      final String prepared = archive;
+      final Exception error = failure;
+      mContext.runOnUiThread(() -> {
+        mArchiveSharing = false;
+        if (mContext.isFinishing() || mContext.isDestroyed()) return;
+        mContext.refreshUI();
+        try {
+          if (error != null) throw error;
+          Uri uri = FileProvider.getUriForFile(mContext, BuildConfig.APPLICATION_ID + ".provider", new File(prepared));
+          Intent send = ModelSharing.createSendIntent(uri, "application/zip", new File(prepared).getName());
+          Intent chooser = Intent.createChooser(send, mContext.getString(R.string.share_dataset_archive));
+          chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+          chooser.setClipData(send.getClipData());
+          mContext.startActivity(chooser);
+        } catch (Exception errorSharing) {
+          Toast.makeText(mContext, mContext.getString(R.string.share_model_failed,
+                  errorSharing.getMessage()), Toast.LENGTH_LONG).show();
+        }
+      });
+    }, "share-dataset").start();
   }
 
   public void rename() {
@@ -485,13 +383,24 @@ class FileAdapter extends BaseAdapter
     }
     if (mSelected.contains(index)) {
       mSelected.remove((Integer) index);
-      selection.setVisibility(View.GONE);
     } else {
       mSelected.add(index);
-      selection.setVisibility(View.VISIBLE);
     }
 
+    updateSelection(selection, mSelected.contains(index));
     mContext.setOptions(mSelected.size());
+  }
+
+  private void updateSelection(View selection, boolean selected) {
+    selection.setVisibility(selected ? View.VISIBLE : View.GONE);
+    View parent = (View) selection.getParent();
+    while (!(parent instanceof MaterialCardView)) parent = (View) parent.getParent();
+    MaterialCardView card = (MaterialCardView) parent;
+    card.setSelected(selected);
+    card.setStrokeColor(mContext.getColor(selected ? R.color.scanner_primary : R.color.scanner_outline));
+    card.setStrokeWidth((int) mContext.convertDpToPx(selected ? 2 : 1));
+    String description = (String) card.getTag();
+    card.setContentDescription(selected ? mContext.getString(R.string.model_selected, description) : description);
   }
 
   public String getSelected() {
@@ -509,13 +418,7 @@ class FileAdapter extends BaseAdapter
       return false;
     }
 
-    String key = (String)getItem(mSelected.get(0));
-    for (String ext : Exporter.FILE_EXT) {
-      if (key.endsWith(ext)) {
-        return true;
-      }
-    }
-    return false;
+    return !Exporter.isFolder((String)getItem(mSelected.get(0)));
   }
 
   public void forwardTouch(MotionEvent event) {

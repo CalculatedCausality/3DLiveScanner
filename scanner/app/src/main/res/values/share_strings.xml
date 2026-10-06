@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="share_dataset_export">Export an OBJ or PLY model</string>
+    <string name="share_dataset_archive">Share raw dataset archive (ZIP)</string>
+    <string name="share_model_title">Share model</string>
+    <string name="share_model_obj">Share model file (OBJ + assets ZIP)</string>
+    <string name="share_model_ply">Share model file (PLY)</string>
+    <string name="share_model_preparing">Preparing model file…</string>
+    <string name="share_model_busy">A model share is already being prepared. Please wait.</string>
+    <string name="share_model_failed">Could not share this model. %1$s</string>
+    <string name="share_model_dataset_export">This folder contains a raw scan dataset. Export it to OBJ or PLY before sharing a model. Raw dataset sharing is not supported here.</string>
+</resources>

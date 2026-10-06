@@ -1,39 +1,49 @@
 package com.lvonasek.arcore3dscanner.ui;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
+import androidx.appcompat.app.AlertDialog;
 import android.content.Context;
-import android.content.DialogInterface;
+import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.GridView;
+import android.widget.TextView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.lvonasek.arcore3dscanner.R;
+import java.util.List;
 
 public class CommonDialogs {
 
+    static Dialog showScanChoices(Context context, List<String> values, List<Drawable> icons, int title) {
+        Dialog dialog = new MaterialAlertDialogBuilder(context)
+                .setView(R.layout.dialog_scan)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.show();
+        if (title != 0) ((TextView) dialog.findViewById(R.id.name)).setText(title);
+        ((GridView) dialog.findViewById(R.id.list)).setAdapter(new ArrayAdapterWithIcons(context, values, icons));
+        return dialog;
+    }
+
     public static void confirmDialog(Activity context, int title, Runnable proceed) {
-        AlertDialog.Builder dialog = new AlertDialog.Builder(context);
-        dialog.setTitle(title);
-        dialog.setMessage(com.lvonasek.arcore3dscanner.R.string.continue_question);
-        dialog.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                proceed.run();
-            }
-        });
-        dialog.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                dialog.dismiss();
-            }
-        });
+        AlertDialog.Builder dialog = new MaterialAlertDialogBuilder(context);
+        boolean discard = title == R.string.scan_discard;
+        boolean finish = title == R.string.scan_finish;
+        dialog.setTitle(discard ? R.string.action_discard_scan
+                : (finish ? R.string.action_finish_scan : title));
+        dialog.setMessage(discard ? R.string.scan_discard_message
+                : (finish ? R.string.scan_finish_message : R.string.continue_question));
+        dialog.setPositiveButton(discard ? R.string.scan_discard_short
+                : (finish ? R.string.scan_finish_short : android.R.string.ok), (d, which) -> proceed.run());
+        dialog.setNegativeButton(android.R.string.cancel, null);
         AlertDialog d = dialog.create();
-        d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
-        d.getWindow().setBackgroundDrawableResource(com.lvonasek.arcore3dscanner.R.drawable.background_dialog);
         d.setOnDismissListener(dialogInterface -> setImmersive(context.getWindow()));
-        d.show();
 
         //workaround to system UI glitch
         setImmersive(d, context);
+        d.show();
     }
 
     public static void setImmersive(AlertDialog d, Activity context) {

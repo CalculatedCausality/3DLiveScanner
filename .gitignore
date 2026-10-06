@@ -18,3 +18,6 @@ arcore/jni/x86_64
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Required immutable native input for the default quality flavor.
+!artifacts/3DLiveScanner-modernized-debug-2026-09-29.apk

@@ -53,8 +53,11 @@ class GLESThread extends Thread
       e.printStackTrace();
     } finally
     {
-      mExited = true;
-      sGLThreadManager.threadExiting(this);
+      synchronized (sGLThreadManager)
+      {
+        mExited = true;
+        sGLThreadManager.threadExiting(this);
+      }
     }
   }
 
@@ -71,9 +74,14 @@ class GLESThread extends Thread
   {
     if (mHaveEglContext)
     {
-      mEglHelper.finish();
       mHaveEglContext = false;
-      sGLThreadManager.releaseEglContextLocked(this);
+      try
+      {
+        mEglHelper.finish();
+      } finally
+      {
+        sGLThreadManager.releaseEglContextLocked(this);
+      }
     }
   }
 
@@ -170,7 +178,13 @@ class GLESThread extends Thread
                     mEglHelper.start();
                   } catch (RuntimeException t)
                   {
-                    sGLThreadManager.releaseEglContextLocked(this);
+                    try
+                    {
+                      mEglHelper.finish();
+                    } finally
+                    {
+                      sGLThreadManager.releaseEglContextLocked(this);
+                    }
                     throw t;
                   }
                   mHaveEglContext = true;
@@ -267,13 +281,16 @@ class GLESThread extends Thread
             }
         }
 
-        {
-          GLESSurfaceView view = mGLESSurfaceViewWeakRef.get();
-          if (view != null)
-            if (view.mRenderer != null)
-              view.mRenderer.onDrawFrame(gl);
-        }
+        GLESSurfaceView view = mGLESSurfaceViewWeakRef.get();
+        FrameTimings timings = view == null ? null : view.mFrameTimings;
+        long frameStart = timings == null ? 0 : System.nanoTime();
+        if (view != null)
+          if (view.mRenderer != null)
+            view.mRenderer.onDrawFrame(gl);
+        long drawEnd = timings == null ? 0 : System.nanoTime();
         int swapError = mEglHelper.swap();
+        if (timings != null)
+          timings.recordFrame(frameStart, drawEnd, System.nanoTime(), swapError == EGL10.EGL_SUCCESS);
         switch (swapError)
         {
           case EGL10.EGL_SUCCESS:
@@ -295,10 +312,18 @@ class GLESThread extends Thread
 
     } catch(Exception e)
     {
+      e.printStackTrace();
+    } finally
+    {
       synchronized (sGLThreadManager)
       {
-        stopEglSurfaceLocked();
-        stopEglContextLocked();
+        try
+        {
+          stopEglSurfaceLocked();
+        } finally
+        {
+          stopEglContextLocked();
+        }
       }
     }
   }
@@ -394,7 +419,6 @@ class GLESThread extends Thread
   {
     try
     {
-      Thread.sleep(5);
       sGLThreadManager.wait();
     } catch (InterruptedException e)
     {

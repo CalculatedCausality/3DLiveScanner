@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="coverage_preview">Coarse coverage preview (experimental)</string>
+    <string name="coverage_preview_summary">Use a coarser 5 cm live mesh for speed. Small surfaces and gaps may look incomplete. Leave off to preview at your selected scan resolution. Recorded measurements are retained. Applies to new scans.</string>
+    <string name="tpu_depth_test">Experimental TPU depth cleanup</string>
+    <string name="tpu_depth_test_summary">Test learned depth corrections on live scans. The scan status shows TPU activity or original-depth fallback. Original inputs are backed up with corrected frames. Turn off to compare with the normal pipeline.</string>
+</resources>

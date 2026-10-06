@@ -2,20 +2,16 @@
 <resources>
     <!-- File Manager !-->
     <string name="app_name" translatable="false">3D Live Scanner</string>
-    <string name="no_data">No 3D models</string>
     <string name="migrating_data">Migrating data into a new folder, please wait…</string>
     <string name="name_exists">A model with the entered name already exists.</string>
-    <string name="invalid_name">Invalid file name!</string>
     <string name="delete">Delete data</string>
     <string name="capture">Scan</string>
     <string name="settings">Settings</string>
-    <string name="scene_res">Choose capturing resolution</string>
-    <string name="jump">The app detected invalid motion tracking data. Please check that device shows correct position and then click on record icon to continue scanning.</string>
-    <string name="move">Move the device around to start scanning.</string>
+    <string name="jump">Motion tracking was interrupted. Check that the device position looks correct, then resume scanning.</string>
+    <string name="move">Move slowly around the object, keeping it in view.</string>
     <string name="continue_question">Do you want to continue?</string>
     <string name="info">By using this app, you agree with our #BEGIN#privacy policy#END#.\n\nAll data is saved in the \"Models\" folder within your mobile device\'s internal storage.</string>
     <string name="share_via">Share via</string>
-    <string name="postprocess">Postprocess</string>
     <string name="wait">Please wait</string>
     <string name="export">Export data</string>
     <string name="folder_new">New folder</string>
@@ -25,23 +21,41 @@
     <string name="permissions_required">For 3D scanning functionality the camera and storage permissions are requested.</string>
     <string name="policy_accepted">I read and accept the privacy policy</string>
     <string name="more_items">More items</string>
-    <string name="upgrade">Upgrade</string>
-    <string name="upgrade_details">In comparison to the free version, the paid version offers more settings, no ads and possibility to capture a dataset. Using that you can:\n- export floorplan\n- export raw pointcloud</string>
     <string name="storage_bug">The app has detected that your device is affected by an Android bug that prevents access to some data. The app cannot work properly until the problem get resolved.\n\nThis problem can be resolved manually only.</string>
     <string name="resolve_manually">Resolve the problem</string>
     <string name="show_normals">Show normals</string>
     <string name="photo_mode">Photo mode</string>
-
-    <!-- Sketchfab uploader !-->
-    <string name="description">Description:</string>
-    <string name="model_name">Model Name:</string>
-    <string name="sketchfab_dialog_title">Upload to Sketchfab</string>
-    <string name="sketchfab_pro">Note that for size over 100 MB, a Sketchfab PRO account is required, otherwise the upload may fail.</string>
-    <string name="sketchfab_upload_ready">Model is compressed and ready to upload!</string>
-    <string name="sketchfab_uploading">Uploading the model to Sketchfab…</string>
-    <string name="tags">Tags:</string>
-    <string name="upload">Upload</string>
-    <string name="upload_size_is">Total size to upload is</string>
+    <string name="scans_title">My scans</string>
+    <string name="new_scan">New scan</string>
+    <string name="empty_scans_guidance">No scans yet. Tap New scan to create your first model.</string>
+    <string name="choose_action">Choose an option to continue.</string>
+    <string name="action_show_location">Show scan location</string>
+    <string name="action_rename">Rename or move</string>
+    <string name="action_rewind_scan">Rewind scan</string>
+    <string name="action_start_scan">Start scanning</string>
+    <string name="action_pause_scan">Pause scanning</string>
+    <string name="action_capture_frame">Capture frame</string>
+    <string name="action_finish_scan">Finish and save scan</string>
+    <string name="action_discard_scan">Discard scan</string>
+    <string name="action_scan_options">Show scan options</string>
+    <string name="action_hide_scan_options">Hide scan options</string>
+    <string name="action_orbit_view">Orbit view</string>
+    <string name="action_top_view">Top view</string>
+    <string name="action_first_person_view">First-person view</string>
+    <string name="action_vr_view">VR view</string>
+    <string name="action_edit_model">Edit model</string>
+    <string name="action_share_model">Share or capture model</string>
+    <string name="action_save_editor">Save model or return to editor tools</string>
+    <string name="scan_paused_low_memory">Scanning paused to protect the current model. Close other apps or save the scan before continuing.</string>
+    <string name="scan_paused_low_storage">Scanning paused before storage became full. Free device storage or save the scan before continuing.</string>
+    <string name="scan_history_failed">Unable to read part of the scan history. The current model was preserved.</string>
+    <string name="recovery_title">Interrupted scan found</string>
+    <string name="recovery_message">A previous scan ended unexpectedly. Recover its committed frames as a dataset before starting another scan.</string>
+    <string name="recovery_corrupt">The interrupted scan is incomplete or damaged. Keep its files for manual recovery, or discard them before starting another scan.</string>
+    <string name="recovery_finalize">Recover dataset</string>
+    <string name="recovery_keep">Not now</string>
+    <string name="recovery_failed">The interrupted scan could not be recovered. Its files were left unchanged.</string>
+    <string name="processing_channel">Save and processing</string>
 
     <!-- Settings !-->
     <string name="analyse_summary">Analyze photos before texturing and ensure only good photos are used.</string>
@@ -53,9 +67,6 @@
     <string name="mode_realtime">Indoor/outdoor scanning</string>
     <string name="mode_dataset">Capture a dataset</string>
     <string name="mode_face">Face scanning</string>
-    <string name="scan_single_room">Single room scanning</string>
-    <string name="scan_large_interior">Large interior scanning</string>
-    <string name="scan_exterior">Exterior scanning</string>
     <string name="export_floorplan">Export as floorplan</string>
     <string name="export_pointcloud">Export as pointcloud</string>
     <string name="export_model">Export as 3D model</string>
@@ -149,12 +160,11 @@
     <string name="postprocessing">Postprocessing the model…</string>
     <string name="saving">Saving the model…</string>
     <string name="turn_off">You can exit the app without losing data.</string>
-    <string name="warning">Warning</string>
     <string name="working">The app is working, please do not turn off the device and do not start another AR app.</string>
 
     <!-- Event !-->
     <string name="event_analyse">Photos analysis</string>
-    <string name="event_features">Motion tracking detected issues</string>
+    <string name="event_features">Tracking needs more visual detail. Point at a well-lit, textured surface.</string>
     <string name="event_convert">Converting data</string>
     <string name="event_image">Processing photo</string>
     <string name="event_merge">Merging results</string>
@@ -173,25 +183,7 @@
     <string name="screenshot">Screenshot</string>
     <string name="videoshot">Rotating video</string>
 
-    <string-array name="shares">
-        <item>Android dialog</item>
-        <item>Online convertor</item>
-        <item>Sketchfab</item>
-    </string-array>
-
     <string-array name="empty">
     </string-array>
 
-    <!-- Branded apps texts !-->
-    <string name="fd_diameter">Diameter</string>
-    <string name="fd_length">Length</string>
-    <string name="fd_volume">Volume</string>
-    <string name="fd_write_scan_desc">Write scan description</string>
-    <string name="fd_select_scan_type">Select scan type</string>
-    <string name="fd_scan_type_trunk">Trunk</string>
-    <string name="fd_scan_type_stack">Stack</string>
-    <string name="fd_scan_type_transport">Transport</string>
-    <string name="fd_scan_type_tree">Tree</string>
-    <string name="fd_scan_type_other">Others</string>
-    <string name="fd_scan_limit">Maximal amount of scans reached. Delete some scans to continue or contact office@forestdesign.ro for more information.</string>
 </resources>

@@ -12,6 +12,9 @@ public class JNI
 {
   static {
     System.loadLibrary("3dscanner");
+    if ("quality".equals(com.lvonasek.arcore3dscanner.BuildConfig.FLAVOR)) {
+      System.loadLibrary("scanner_quality_bridge");
+    }
   }
 
   public static boolean motionTrackingMessages = true;
@@ -20,10 +23,13 @@ public class JNI
   public static native boolean onARServiceConnected(Context context, double res, double dmin,
                                                     double dmax, int noise, boolean holes,
                                                     boolean poseCorr, boolean distortion, boolean offset,
-                                                    boolean flashlight, int mode, boolean clearing, byte[] temp);
+                                                    boolean flashlight, int mode, boolean clearing,
+                                                    byte[] temp, byte[] cacheDirectory);
 
   // Setup the view port width and height.
   public static native void onGlSurfaceChanged(int width, int height, boolean fullhd);
+
+  public static native void onGlSurfaceCreated();
 
   // Main render loop.
   public static native boolean onGlSurfaceDrawFrame(boolean faceMode, float yaw, int viewMode, boolean anchors, boolean grid, boolean smooth);
@@ -32,7 +38,7 @@ public class JNI
   public static native void onToggleButtonClicked(boolean reconstructionRunning);
 
   // Called when the clear button is clicked
-  public static native void onClearButtonClicked();
+    public static native boolean onClearButtonClicked();
 
   // Called when the undo button is clicked
   public static native void onUndoButtonClicked(boolean fromUser, boolean texturize);
@@ -42,6 +48,7 @@ public class JNI
 
   // Pauses the AR
   public static native void onPause();
+  public static native void onResume();
 
   // Extract data from the dataset
   public static native void extract(byte[] path, int mode);
@@ -56,13 +63,20 @@ public class JNI
   public static native boolean save(byte[] name);
 
   // Save current 3D model with textures (editor usage)
-  public static native void saveWithTextures(byte[] name);
+  public static native boolean saveWithTextures(byte[] name);
 
   // Set parameters of texturing
   public static native void setTextureParams(int detail, int res, int count);
+  public static native void setExperimentalDepth(boolean enabled);
+  public static native void setCoveragePreview(boolean enabled);
+  public static native boolean finishCapture();
+  public static native String getExperimentalDepthStatus();
+  public static native String getCaptureDiagnostics();
+  public static native String testExperimentalDepthRuntime();
 
   // Texturize 3D model
-  public static native void texturize(byte[] input, byte[] output, boolean poisson, boolean twoPass);
+  public static native boolean texturize(byte[] input, byte[] output, boolean poisson, boolean twoPass);
+  public static native String getTexturingError();
 
   // Set view on 3D view
   public static native void setView(float pitch, float yaw, float x, float y, float z, float o, boolean gyro);
@@ -81,6 +95,8 @@ public class JNI
 
   // Scan size
   public static native int getScanSize();
+
+  public static native boolean isDatasetValid(byte[] path);
 
   // Get back previous state of the model
   public static native void restore();
@@ -116,11 +132,19 @@ public class JNI
   public static native boolean animFinished();
 
   // Indicate that the motion tracking jumped
-  public static native boolean didARjump();
+    public static native boolean didARjump();
+
+    public static native boolean didHistoryFail();
+
+    public static native boolean didWriteFail();
+    public static native int getRecoveryState();
 
   public static String getEvent(Resources r)
   {
     String event = new String(getEvent());
+    event = event.replace("Recovering scan", r.getString(R.string.scan_recovering));
+    event = event.replace("Reconstruction unavailable; retry scanning", r.getString(R.string.scan_retry_reconstruction));
+    event = event.replace("Frame rejected; accepted scan kept", r.getString(R.string.scan_frame_rejected));
     event = event.replace("ANALYSE", r.getString(R.string.event_analyse));
     event = event.replace("FEW_FEATURES", r.getString(R.string.event_features));
     event = event.replace("CONVERT", r.getString(R.string.event_convert));
@@ -131,6 +155,7 @@ public class JNI
     event = event.replace("UNWRAP", r.getString(R.string.event_unwrap));
     event = event.replace("POISSON", r.getString(R.string.poisson));
     event = event.replace("ALIGNMENT", r.getString(R.string.align_pose));
+    event = event.replace("HISTORY_FAILED", r.getString(R.string.scan_history_failed));
 
     if (motionTrackingMessages) {
       event = event.replace("MT_INIT", "");

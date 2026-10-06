@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_hint">Tap to open · Touch and hold to select</string>
+    <string name="close_selection">Clear selection</string>
+    <string name="scan_pause_short">Pause</string>
+    <string name="scan_resume_short">Resume</string>
+    <string name="scan_capture_short">Capture</string>
+    <string name="scan_finish_short">Finish</string>
+    <string name="scan_status_live">Scanning · Move slowly</string>
+    <string name="scan_status_paused">Paused · Resume when ready</string>
+    <string name="scan_status_attention">Paused · Check the message above</string>
+    <string name="scan_status_photo">Photo mode · Capture a frame</string>
+    <string name="scan_status_face">Face scan · Finish when ready</string>
+    <string name="scan_discard_short">Discard</string>
+    <string name="scan_finish_message">Save this scan and continue to processing?</string>
+    <string name="scan_discard_message">Discard the current scan? This cannot be undone.</string>
+    <string name="scan_rewind_back">Rewind one frame</string>
+    <string name="scan_rewind_back_fast">Rewind ten frames</string>
+    <string name="scan_rewind_forward">Advance one frame</string>
+    <string name="scan_rewind_forward_fast">Advance ten frames</string>
+    <string name="model_type_mesh">3D model</string>
+    <string name="model_type_dataset">Dataset · Tap to export</string>
+    <string name="model_type_points">Point cloud</string>
+    <string name="model_type_folder">Folder</string>
+    <string name="model_selected">Selected: %1$s</string>
+    <string name="model_accessibility">%1$s, %2$s</string>
+    <string name="scan_memory_label">Available memory</string>
+    <string name="scan_battery_label">Battery</string>
+</resources>

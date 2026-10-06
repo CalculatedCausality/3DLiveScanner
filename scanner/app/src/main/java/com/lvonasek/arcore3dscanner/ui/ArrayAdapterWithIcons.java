@@ -42,8 +42,10 @@ public class ArrayAdapterWithIcons extends BaseAdapter {
 
     @Override
     public View getView(int i, View view, ViewGroup viewGroup) {
-        LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-        view = inflater.inflate(R.layout.view_texticon, null, true);
+        if (view == null) {
+            LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+            view = inflater.inflate(R.layout.view_texticon, viewGroup, false);
+        }
 
         TextView text = view.findViewById(R.id.name);
         text.setText(strings.get(i));

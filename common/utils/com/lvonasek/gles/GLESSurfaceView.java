@@ -30,6 +30,12 @@ public class GLESSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     mRenderer = renderer;
   }
 
+  /** Configure before attaching; omitted by default, including other consumers. */
+  public void setFrameTimings(FrameTimings timings)
+  {
+    mFrameTimings = timings;
+  }
+
   public void surfaceCreated(SurfaceHolder holder)
   {
     mGLThread.surfaceCreated();
@@ -78,4 +84,5 @@ public class GLESSurfaceView extends SurfaceView implements SurfaceHolder.Callba
   private final WeakReference<GLESSurfaceView> mThisWeakRef     = new WeakReference<>(this);
   private GLESThread                           mGLThread;
   protected Renderer                           mRenderer;
+  protected volatile FrameTimings              mFrameTimings;
 }

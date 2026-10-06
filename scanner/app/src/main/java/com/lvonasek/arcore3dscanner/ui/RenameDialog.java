@@ -1,6 +1,7 @@
 package com.lvonasek.arcore3dscanner.ui;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.util.Log;
 import android.widget.EditText;
 import android.widget.ListView;
@@ -15,13 +16,12 @@ import java.io.File;
 public class RenameDialog {
 
     private EditText mInput;
-    private ListView mList;
     private TextView mPath;
 
     public RenameDialog(FileManager context, String path, String key) {
-        AlertDialog.Builder renameDlg = new AlertDialog.Builder(context);
-        renameDlg.setView(com.lvonasek.arcore3dscanner.R.layout.dialog_rename);
-        renameDlg.setPositiveButton(context.getString(android.R.string.ok), (dialog, which) -> {
+        AlertDialog.Builder renameDlg = new MaterialAlertDialogBuilder(context);
+        renameDlg.setView(R.layout.dialog_rename);
+        renameDlg.setPositiveButton(android.R.string.ok, (dialog, which) -> {
             int type = Exporter.getModelType(key);
             String name1 = mInput.getText().toString();
             if (type >= 0) {
@@ -29,7 +29,7 @@ public class RenameDialog {
             }
             File newFile = new File(mPath.getText().toString(), name1);
             if(newFile.exists())
-                Toast.makeText(context, com.lvonasek.arcore3dscanner.R.string.name_exists, Toast.LENGTH_LONG).show();
+                Toast.makeText(context, R.string.name_exists, Toast.LENGTH_LONG).show();
             else {
                 File oldFile = new File(path, key);
                 if (oldFile.renameTo(newFile))
@@ -37,10 +37,9 @@ public class RenameDialog {
                 context.refreshUI();
             }
         });
-        renameDlg.setNegativeButton(context.getString(android.R.string.cancel), null);
+        renameDlg.setNegativeButton(android.R.string.cancel, null);
 
         AlertDialog d = renameDlg.create();
-        d.getWindow().setBackgroundDrawable(context.getDrawable(com.lvonasek.arcore3dscanner.R.drawable.background_dialog));
         d.show();
 
         String name = key;
@@ -52,9 +51,8 @@ public class RenameDialog {
         mPath = d.findViewById(R.id.path);
         mPath.setText(path);
 
-        FolderAdapter adapter = new FolderAdapter(context, path, p -> mPath.setText(p));
-        mList = d.findViewById(R.id.list);
-        mList.setAdapter(adapter);
+        FolderAdapter adapter = new FolderAdapter(context, path, mPath::setText);
+        ((ListView) d.findViewById(R.id.list)).setAdapter(adapter);
         adapter.update();
     }
 }

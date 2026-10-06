@@ -7,6 +7,10 @@
         android:key="cat_settings"
         android:title="@string/settings">
 
+        <Preference
+            android:key="privacy_policy_link"
+            android:title="@string/privacy_policy" />
+
         <PreferenceScreen
             android:key="src_hardware"
             android:title="@string/sensor_usage" >
@@ -51,7 +55,19 @@
                         android:title="@string/scan_parameters">
 
                         <CheckBoxPreference
-                            android:defaultValue="true"
+                            android:defaultValue="false"
+                            android:key="pref_coverage_preview"
+                            android:title="@string/coverage_preview"
+                            android:summary="@string/coverage_preview_summary" />
+
+                        <CheckBoxPreference
+                            android:defaultValue="false"
+                            android:key="pref_tpu_depth_test"
+                            android:title="@string/tpu_depth_test"
+                            android:summary="@string/tpu_depth_test_summary" />
+
+                        <CheckBoxPreference
+                            android:defaultValue="false"
                             android:key="@string/pref_offset"
                             android:summary="@string/offset_summary"
                             android:title="@string/offset" />

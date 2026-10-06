@@ -6,11 +6,12 @@ import com.lvonasek.arcore3dscanner.ui.AbstractActivity;
 import com.lvonasek.utils.IO;
 
 import java.io.File;
-import java.io.FileInputStream;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Scanner;
 
 public class Exporter
 {
@@ -23,182 +24,186 @@ public class Exporter
   public static final int EXPORT_TYPE_POINTCLOUD = -200;
 
   public static String compressModel(File model2share) {
-    ArrayList<String> filesToZip = new ArrayList<>();
-    for (String s : model2share.list()) {
-      File f = new File(model2share, s);
-      if (!f.isDirectory()) {
-        filesToZip.add(f.getAbsolutePath());
-      }
-    }
-
-    File zipFile = new File(AbstractActivity.getTempPath(), "upload.scan.zip");
-    if (zipFile.exists())
-      zipFile.delete();
-    String zipOutput = zipFile.getAbsolutePath();
+    File staging = null;
     try {
-      IO.zip(filesToZip, zipOutput);
+      // Separate requests must not replace an archive another share intent is still reading.
+      staging = IO.createStagingDirectory(AbstractActivity.getScratchPath());
+      File zipFile = new File(staging, "upload.scan.zip");
+      if (model2share.getCanonicalFile().equals(new File(AbstractActivity.getPath(false)).getCanonicalFile())) {
+        // Legacy loose-model viewer fallback: do not include other scans or the cache directory.
+        File[] files = model2share.listFiles();
+        if (files == null) throw new IOException("Unable to list " + model2share);
+        ArrayList<String> filesToZip = new ArrayList<>();
+        for (File file : files) if (file.isFile()) filesToZip.add(file.getAbsolutePath());
+        IO.zip(filesToZip, zipFile.getAbsolutePath());
+      } else {
+        IO.zipDirectory(model2share, zipFile.getAbsolutePath());
+      }
+      return zipFile.getAbsolutePath();
     } catch (Exception e) {
-      e.printStackTrace();
+      if (staging != null) IO.deleteRecursive(staging);
+      throw new IllegalStateException("Unable to archive " + model2share, e);
     }
-    return zipOutput;
   }
 
+  /** Publishes the existing scan-directory format in one rename and retains all source files.
+   * Returns the model inside the directory, as expected by the viewer. Existing scans are refused.
+   * Callers must catch IllegalStateException before resetting the service or deleting its source. */
   public static File export(File file, String filename) {
-    File file2save = null;
-
-    if (file.getAbsolutePath().endsWith(Exporter.EXT_OBJ)) {
-      file2save = new File(AbstractActivity.getPath(false), filename + Exporter.EXT_OBJ);
-
-      //delete old files during overwrite
-      try {
-        if (file2save.exists())
-          for (String s : Exporter.getObjResources(file2save))
-            if (new File(AbstractActivity.getPath(false), s).delete())
-              Log.d(AbstractActivity.TAG, "File " + s + " deleted");
-      } catch (Exception e) {
-        e.printStackTrace();
+    File staging = null;
+    try {
+      int type = getModelType(file.getName());
+      if (type != 1 && type != 2) throw new IOException("Unsupported model: " + file);
+      if (filename == null || filename.isEmpty() || !new File(filename).getName().equals(filename)) {
+        throw new IOException("Invalid model name: " + filename);
       }
-
-      //move file from temp into folder
-      for (String s : Exporter.getObjResources(file.getAbsoluteFile()))
-        if (new File(new File(file.getParent()), s).renameTo(new File(AbstractActivity.getPath(false), s)))
-          Log.d(AbstractActivity.TAG, "File " + s + " saved");
-      if (file.renameTo(file2save))
-        Log.d(AbstractActivity.TAG, "Obj file " + file2save.toString() + " saved.");
-    }
-
-    if (file.getAbsolutePath().endsWith(Exporter.EXT_PLY)) {
-      file2save = new File(AbstractActivity.getPath(false), filename + Exporter.EXT_PLY);
-
-      //delete old file during overwrite
-      if (file2save.exists())
-        file2save.delete();
-
-      //move file from temp
-      if (file.renameTo(file2save))
-        Log.d(AbstractActivity.TAG, "Ply file " + file2save.toString() + " saved.");
-    }
-
-    //copy GPS file
-    File gpsFile = new File(file.getParent(), "position.txt");
-    if (gpsFile.exists()) {
-      File newGPS = new File(AbstractActivity.getPath(false), "position.txt");
-      if (newGPS.exists()) {
-        newGPS.delete();
+      File root = new File(AbstractActivity.getPath(false));
+      File destination = IO.resolveContainedFile(root, filename + FILE_EXT[type]);
+      if (destination.exists()) throw new IOException("Scan already exists: " + destination);
+      staging = IO.createStagingDirectory(root);
+      copyResources(file, staging);
+      String modelName = filename + FILE_EXT[type];
+      File model = IO.resolveContainedFile(staging, modelName);
+      if (model.exists()) throw new IOException("Model/resource name collision: " + modelName);
+      IO.copyChecked(file, model);
+      if (destination.exists() || !staging.renameTo(destination)) {
+        throw new IOException("Unable to publish scan: " + destination);
       }
-      IO.copy(gpsFile, newGPS);
+      return new File(destination, modelName);
+    } catch (IOException e) {
+      throw new IllegalStateException("Unable to export " + file, e);
+    } finally {
+      if (staging != null) IO.deleteRecursive(staging);
     }
+  }
 
-    return file2save;
+  private static void copyResources(File model, File staging) throws IOException {
+    File source = model.getAbsoluteFile().getParentFile();
+    ArrayList<String> resources = model.getName().endsWith(EXT_OBJ)
+            ? readObjResources(model) : new ArrayList<>();
+    if (new File(source, "position.txt").exists()) resources.add("position.txt");
+    for (String name : resources) {
+      File input = IO.resolveContainedFile(source, name);
+      File output = IO.resolveContainedFile(staging, name);
+      if (!output.getParentFile().isDirectory() && !output.getParentFile().mkdirs()) {
+        throw new IOException("Unable to create " + output.getParent());
+      }
+      IO.copyChecked(input, output);
+    }
   }
 
   public static boolean isFolder(String s) {
-    for (String ext : Exporter.FILE_EXT) {
-      if (s.endsWith(ext)) {
-        return false;
-      }
-    }
-    return true;
+    return getModelType(s) < 0;
   }
 
   public static int getModelType(String filename) {
     for(int i = 0; i < FILE_EXT.length; i++) {
-      int begin = filename.length() - FILE_EXT[i].length();
-      if (begin >= 0)
-        if (filename.substring(begin).contains(FILE_EXT[i]))
-          return i;
+      if (filename.endsWith(FILE_EXT[i]))
+        return i;
     }
     return -1;
   }
 
   public static String getMtlResource(String obj)
   {
-    try
-    {
-      Scanner sc = new Scanner(new FileInputStream(obj));
-      while(sc.hasNext()) {
-        String line = sc.nextLine();
-        if (line.startsWith("mtllib")) {
-          return line.substring(7);
-        }
-      }
-      sc.close();
-    } catch (Exception e)
-    {
-      e.printStackTrace();
+    try {
+      return readMtlResource(new File(obj));
+    } catch (IOException e) {
+      // Thumbnail callers use a nullable lookup. Export uses the strict reader directly.
+      Log.e(AbstractActivity.TAG, "Unable to read model resources: " + obj, e);
+      return null;
     }
-    return null;
   }
 
   public static ArrayList<String> getObjResources(File file)
   {
+    try {
+      return readObjResources(file);
+    } catch (IOException e) {
+      throw new IllegalStateException("Unable to read model resources: " + file, e);
+    }
+  }
+
+  private static String readMtlResource(File obj) throws IOException {
+    try (BufferedReader reader = new BufferedReader(new FileReader(obj))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        line = line.trim();
+        if (line.equals("mtllib")) throw new IOException("Missing material library in " + obj);
+        if (line.startsWith("mtllib ") || line.startsWith("mtllib\t")) {
+          String name = line.substring(6).trim();
+          IO.resolveContainedFile(obj.getAbsoluteFile().getParentFile(), name);
+          return name;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static ArrayList<String> readObjResources(File file) throws IOException {
     HashSet<String> files = new HashSet<>();
     ArrayList<String> output = new ArrayList<>();
-    String mtlLib = getMtlResource(file.getAbsolutePath());
+    File root = file.getAbsoluteFile().getParentFile();
+    String mtlLib = readMtlResource(file);
     if (mtlLib != null) {
       output.add(mtlLib);
-      output.add(mtlLib + ".png");
-      mtlLib = file.getParent() + "/" + mtlLib;
-      try
-      {
-        Scanner sc = new Scanner(new FileInputStream(mtlLib));
-        while(sc.hasNext()) {
-          String line = sc.nextLine();
-          if (line.startsWith("map_") || line.startsWith("norm")) {
-            String filename = line.substring(line.indexOf(" ") + 1);
-            if (!files.contains(filename)) {
-              files.add(filename);
+      // Generated preview is optional; declared material libraries and textures are not.
+      if (IO.resolveContainedFile(root, mtlLib + ".png").isFile()) output.add(mtlLib + ".png");
+      try (BufferedReader reader = new BufferedReader(new FileReader(IO.resolveContainedFile(root, mtlLib)))) {
+        String line;
+        while ((line = reader.readLine()) != null) {
+          line = line.trim();
+          if (line.startsWith("map_") || line.startsWith("norm ") || line.startsWith("norm\t")) {
+            String[] parts = line.split("\\s+", 2);
+            if (parts.length != 2) throw new IOException("Missing texture name in " + mtlLib);
+            String filename = parts[1].trim();
+            IO.resolveContainedFile(root, filename);
+            if (files.add(filename)) {
               output.add(filename);
             }
           }
         }
-        sc.close();
-      } catch (Exception e)
-      {
-        e.printStackTrace();
       }
     }
     return output;
   }
 
   public static void makeStructure(String path) {
-    //get list of files
-    ArrayList<String> files = AbstractActivity.listFiles(new File(path));
-    if (files.isEmpty())
-      return;
-    Collections.sort(files, String::compareTo);
+    // Read-only enumeration: AbstractActivity.listFiles also schedules background deletions.
+    File[] files = new File(path).listFiles();
+    if (files == null) return;
     ArrayList<String> models = new ArrayList<>();
-    for(String s : files)
-      if(new File(s).isFile())
-        if(getModelType(s) >= 0)
-          models.add(s);
+    for (File file : files)
+      if (file.isFile() && getModelType(file.getName()) >= 0)
+        models.add(file.getAbsolutePath());
+    Collections.sort(models, String::compareTo);
 
     //restructure models
     for (String s : models) {
 
-      //create temp folder
-      File temp = new File(path, "temp");
-      if (temp.exists())
-        AbstractActivity.deleteRecursive(temp);
-      temp.mkdir();
-
-      //get model files
-      ArrayList<String> res = new ArrayList<>();
-      File gpsFile = new File(path, "position.txt");
-      if (gpsFile.exists())
-        res.add(gpsFile.getName());
-      if (Exporter.FILE_EXT[getModelType(s)].compareTo(Exporter.EXT_OBJ) == 0) {
-        res.addAll(getObjResources(new File(s)));
+      File model = new File(s);
+      File staging = null;
+      File movedModel = null;
+      boolean retainStaging = false;
+      try {
+        staging = IO.createStagingDirectory(model.getAbsoluteFile().getParentFile());
+        copyResources(model, staging);
+        movedModel = new File(staging, model.getName());
+        if (movedModel.exists() || !model.renameTo(movedModel)) {
+          throw new IOException("Unable to stage model: " + model);
+        }
+        retainStaging = true;
+        if (!staging.renameTo(model)) {
+          // Keep the only model copy if rollback itself fails. Never clean it as scratch data.
+          retainStaging = !movedModel.renameTo(model);
+          throw new IOException("Unable to restructure " + model + (retainStaging ? "; retained in " + staging : ""));
+        }
+        retainStaging = false;
+      } catch (IOException e) {
+        Log.e(AbstractActivity.TAG, "Unable to restructure " + model, e);
+      } finally {
+        if (staging != null && !retainStaging) IO.deleteRecursive(staging);
       }
-      res.add(new File(s).getName());
-
-      //restructure
-      for (String r : res) {
-        File f = new File(path, r);
-        if (f.exists())
-          f.renameTo(new File(temp, r));
-      }
-      temp.renameTo(new File(s));
     }
   }
 }

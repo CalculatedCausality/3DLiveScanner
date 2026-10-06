@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Development control restricted to senders holding signature/system
+             DUMP permission (including adb shell), never shipped in release. -->
+        <receiver android:name="com.lvonasek.arcore3dscanner.debug.TpuTestReceiver"
+                  android:exported="true" android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

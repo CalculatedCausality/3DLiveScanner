@@ -14,7 +14,6 @@ import javax.microedition.khronos.opengles.GL;
 class EGLHelper
 {
   private static final int EGL_CONTEXT_CLIENT_VERSION = 0x3098;
-  private static EGLContext lastContext = null;
 
   private WeakReference<GLESSurfaceView>         mGLESSurfaceViewWeakRef;
   private EGL10                                  mEgl;
@@ -46,12 +45,8 @@ class EGLHelper
     } else
     {
       mEglConfig = new EGLConfigChooser(8, 8, 8, 8, 16, 8).chooseConfig(mEgl, mEglDisplay);
-      if (lastContext == null)
-      {
-        int[] att = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE };
-        lastContext = mEgl.eglCreateContext(mEglDisplay, mEglConfig, EGL10.EGL_NO_CONTEXT, att);
-      }
-      mEglContext = lastContext;
+      int[] att = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE };
+      mEglContext = mEgl.eglCreateContext(mEglDisplay, mEglConfig, EGL10.EGL_NO_CONTEXT, att);
     }
     if (mEglContext == null || mEglContext == EGL10.EGL_NO_CONTEXT)
     {
@@ -118,12 +113,23 @@ class EGLHelper
 
   public void finish()
   {
-    if (mEglContext != null)
-      mEglContext = null;
-    if (mEglDisplay != null)
+    try
     {
-      mEgl.eglTerminate(mEglDisplay);
-      mEglDisplay = null;
+      if (mEglContext != null && mEglContext != EGL10.EGL_NO_CONTEXT)
+        mEgl.eglDestroyContext(mEglDisplay, mEglContext);
+    } finally
+    {
+      mEglContext = null;
+      if (mEglDisplay != null && mEglDisplay != EGL10.EGL_NO_DISPLAY)
+      {
+        try
+        {
+          mEgl.eglTerminate(mEglDisplay);
+        } finally
+        {
+          mEglDisplay = null;
+        }
+      }
     }
   }
 

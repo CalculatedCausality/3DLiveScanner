@@ -6,15 +6,11 @@ import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
-import android.os.Build;
 
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.CameraConfig;
 import com.google.ar.core.Config;
 import com.google.ar.core.Session;
-import com.huawei.hiar.ARConfigBase;
-import com.huawei.hiar.ARSession;
-import com.huawei.hiar.ARWorldTrackingConfig;
 
 public class Compatibility {
 
@@ -54,15 +50,7 @@ public class Compatibility {
         if (availability == ArCoreApk.Availability.SUPPORTED_NOT_INSTALLED) {
             return true;
         }
-        try {
-            ARSession session = new ARSession(context);
-            ARWorldTrackingConfig config = new ARWorldTrackingConfig(session);
-            session.configure(config);
-            return true;
-        } catch (Exception e) {
-            e.printStackTrace();
-            return false;
-        }
+        return ARProviderFeatures.isHuaweiSupported(context);
     }
 
     public static boolean isARCoreSupportedAndUpToDate(Activity activity) {
@@ -98,6 +86,7 @@ public class Compatibility {
 
     public static boolean isDaydreamSupported(Context context)
     {
+        if (!isLegacyVRSupported()) return false;
         Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
         mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
         for (ResolveInfo info : context.getPackageManager().queryIntentActivities( mainIntent, 0))
@@ -107,26 +96,30 @@ public class Compatibility {
     }
 
     public static boolean isGoogleDepthSupported(Activity activity) {
+        Session session = null;
         try {
             if (!isPlayStoreSupported(activity)) {
                 return false;
             }
 
-            Session session = new Session(activity);
+            session = new Session(activity);
             return session.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY);
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            releaseProbeSession(session);
         }
         return false;
     }
 
     public static boolean isGoogleToFSupported(Activity activity) {
+        Session session = null;
         try {
             if (!isPlayStoreSupported(activity)) {
                 return false;
             }
 
-            Session session = new Session(activity);
+            session = new Session(activity);
             for (CameraConfig config : session.getSupportedCameraConfigs()) {
                 if (config.getDepthSensorUsage() == CameraConfig.DepthSensorUsage.REQUIRE_AND_USE) {
                     return true;
@@ -134,33 +127,25 @@ public class Compatibility {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            releaseProbeSession(session);
         }
         return false;
     }
 
     public static boolean isHuaweiToFSupported(Activity activity) {
-        //blacklist Huawei Mate 20, Huawei Mate 20 RS, Huawei Mate 20 X
-        if (Build.DEVICE.startsWith("HWHMA")) return false;
-        if (Build.DEVICE.startsWith("HWLYA")) return false;
-        if (Build.DEVICE.startsWith("HWEVR")) return false;
-        //blacklist Huawei P20 Pro
-        if (Build.DEVICE.startsWith("HW-01K")) return false;
-        if (Build.DEVICE.startsWith("HWCLT")) return false;
-        //blacklist Huawei P30
-        if (Build.DEVICE.startsWith("HWELE")) return false;
+        return ARProviderFeatures.isHuaweiToFSupported(activity);
+    }
 
-        //blacklist devices without ToF sensor
-        if (!hasToFSensor(activity)) return false;
-
-        try {
-            ARSession session = new ARSession(activity);
-            ARWorldTrackingConfig config = new ARWorldTrackingConfig(session);
-            config.setEnableItem(ARConfigBase.ENABLE_DEPTH | ARConfigBase.ENABLE_MESH);
-            session.configure(config);
-            return session.isSupported(config);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return false;
+    // Only for locally owned probe sessions, which are never resumed.
+    // Cleanup failures must not change a capability result; Errors still propagate.
+    private static void releaseProbeSession(Session session) {
+        if (session != null) {
+            try {
+                session.close();
+            } catch (RuntimeException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -175,6 +160,11 @@ public class Compatibility {
     }
 
     public static boolean shouldUseHuawei(Activity activity) {
-        return isHuaweiToFSupported(activity) || !isPlayStoreSupported(activity);
+        return ARProviderFeatures.LEGACY_ENABLED &&
+                (isHuaweiToFSupported(activity) || !isPlayStoreSupported(activity));
+    }
+
+    public static boolean isLegacyVRSupported() {
+        return ARProviderFeatures.LEGACY_ENABLED;
     }
 }

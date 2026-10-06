@@ -1,25 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:paddingBottom="20dp"
-    android:paddingTop="20dp">
+    android:minHeight="72dp"
+    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:background="?attr/selectableItemBackground">
 
     <ImageView
         android:id="@+id/icon"
-        android:layout_width="match_parent"
-        android:layout_height="100dp"
-        android:src="@drawable/ic_launcher"/>
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="16dp"
+        android:scaleType="fitCenter"
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_launcher" />
 
     <TextView
         android:id="@+id/name"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_below="@id/icon"
-        android:layout_centerHorizontal="true"
-        android:gravity="center_horizontal"
-        android:text="@string/app_name"
+        android:layout_weight="1"
         android:textSize="16sp"
-        android:ellipsize="end"
-        android:maxLines="2"/>
-</RelativeLayout>
+        android:textColor="@color/scanner_on_surface" />
+</LinearLayout>

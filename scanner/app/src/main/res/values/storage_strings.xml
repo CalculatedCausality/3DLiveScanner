@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="storage_app_library">Saved in app storage · Share models to keep a copy outside the app</string>
+    <string name="storage_capture_internal">Active captures use internal app storage until saved to the library</string>
+    <string name="scan_recovering">Recovering scan · Your accepted geometry is kept</string>
+    <string name="scan_retry_reconstruction">Reconstruction paused · Tap Resume to retry</string>
+    <string name="scan_frame_rejected">Frame not added · Scan kept. Move back or finish.</string>
+    <string name="storage_import_failed">Could not import this scan. The archive must contain a supported OBJ, PLY, or valid scanner dataset. Existing scans have not been changed.</string>
+    <string name="storage_export_failed">Could not save the model to your library. The source data has been kept. Check available storage, then retry.</string>
+    <string name="storage_retry">Retry save</string>
+    <string name="storage_editor_failed">Could not save the edited model. Existing scans have not been changed. Check storage and choose a new filename before retrying.</string>
+    <string name="storage_imported">Scan imported</string>
+    <string name="storage_open_failed">This folder does not contain a supported model file.</string>
+</resources>

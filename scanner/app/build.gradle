@@ -1,25 +1,99 @@
 apply plugin: 'com.android.application'
 
-configurations { natives }
-def arcore_libpath = "../../arcore"
+// Keep the Java SDK, native SDK and C header on the same version per flavor.
+def arcoreVersions = [modern: '1.56.0', legacy: '1.31.0']
+def jcodecVersion = '0.2.3'
+configurations {
+    modernNatives { canBeConsumed = false }
+    legacyNatives { canBeConsumed = false }
+    qualitySdk { canBeConsumed = false; transitive = false }
+}
+
+def qualityBaseline = file('../../artifacts/3DLiveScanner-modernized-debug-2026-09-29.apk')
+def qualityDirectory = layout.buildDirectory.dir('quality-baseline')
+def extractQualityBaseline = tasks.register('extractQualityBaseline') {
+    inputs.file qualityBaseline
+    inputs.files configurations.qualitySdk
+    outputs.dir qualityDirectory
+    doLast {
+        def sha = { byte[] bytes -> java.security.MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString() }
+        if (sha(qualityBaseline.bytes) != '0b1e81ecfcaabcf04494de38ff98754b1ca0e4abf7d99cdfdebb9476b1f51d0e') {
+            throw new GradleException('The quality flavor requires the exact user-validated native baseline APK')
+        }
+        def destination = qualityDirectory.get().asFile
+        destination.mkdirs()
+        def baseline = new java.util.zip.ZipFile(qualityBaseline)
+        def sdk = new java.util.zip.ZipFile(configurations.qualitySdk.singleFile)
+        try {
+            def sdkJni = 'jni/arm64-v8a/libarcore_sdk_jni.so'
+            if (sha(sdk.getInputStream(sdk.getEntry(sdkJni)).bytes) !=
+                    sha(baseline.getInputStream(baseline.getEntry(sdkJni.replace('jni/', 'lib/'))).bytes)) {
+                throw new GradleException('ARCore Java SDK does not match the validated baseline native JNI SDK')
+            }
+            // Preserve all baseline native bytes. Only Java/resources/manifest
+            // are taken from the matching SDK AAR, avoiding native merge choices.
+            baseline.entries().each { entry ->
+                if (entry.name.startsWith('lib/arm64-v8a/') && entry.name.endsWith('.so')) {
+                    def target = new File(destination, 'jni/' + entry.name.substring(4))
+                    target.parentFile.mkdirs()
+                    target.bytes = baseline.getInputStream(entry).bytes
+                }
+            }
+            new java.util.zip.ZipOutputStream(new FileOutputStream(new File(destination, 'arcore-java.aar'))).withCloseable { output ->
+                sdk.entries().each { entry ->
+                    if (!entry.directory && !entry.name.startsWith('jni/')) {
+                        output.putNextEntry(new java.util.zip.ZipEntry(entry.name))
+                        output.write(sdk.getInputStream(entry).bytes)
+                        output.closeEntry()
+                    }
+                }
+            }
+        } finally { baseline.close(); sdk.close() }
+    }
+}
 
 android {
-    compileSdk = 33
+    namespace = "com.lvonasek.arcore3dscanner"
+    compileSdk = 35
+    ndkVersion '28.2.13676358'
     defaultConfig {
         applicationId = "com.lvonasek.arcore3dscanner"
-        namespace ="com.lvonasek.arcore3dscanner"
         minSdkVersion 24
         targetSdkVersion 33
         resourceConfigurations += ['en']
-        manifestPlaceholders = ['appAuthRedirectScheme': 'https://lvonasek.github.io/redirect.html']
         multiDexEnabled true
         ndk {
             abiFilters 'arm64-v8a'
         }
     }
     buildFeatures {
-            buildConfig true
+        buildConfig true
+    }
+
+    flavorDimensions 'runtime'
+    productFlavors {
+        modern {
+            dimension 'runtime'
+            externalNativeBuild.ndkBuild.arguments 'SCANNER_MODERN=1',
+                    "ARCORE_LIB_DIR=${layout.buildDirectory.get().asFile}/arcore/modern/jni",
+                    "ARCORE_INCLUDE_DIR=${file('../../arcore/include-modern')}"
         }
+        legacy {
+            dimension 'runtime'
+            externalNativeBuild.ndkBuild.arguments 'SCANNER_MODERN=0',
+                    "ARCORE_LIB_DIR=${layout.buildDirectory.get().asFile}/arcore/legacy/jni"
+        }
+        quality {
+            dimension 'runtime'
+            isDefault = true
+            applicationIdSuffix '.quality'
+            versionNameSuffix '-original-engine-test'
+            externalNativeBuild.ndkBuild.arguments 'SCANNER_QUALITY=1', 'APP_STL=c++_static'
+        }
+    }
+
+    // AGP >= 8.5.1 aligns uncompressed native libraries on 16 KiB ZIP boundaries.
+    packaging.jniLibs.useLegacyPackaging = false
 
     externalNativeBuild {
         ndkBuild {
@@ -39,42 +113,65 @@ android {
     }
 
     sourceSets {
-        main.java.srcDirs += '../../common/ar/'
-        main.java.srcDirs += '../../common/record/'
-        main.java.srcDirs += '../../common/utils/'
+        main.java.srcDirs += ['../../common/ar/', '../../common/record/', '../../common/utils/']
+        // GVR subclasses must not be present in the modern runtime.
+        main.java.exclude 'com/lvonasek/arcore3dscanner/vr/**'
+        legacy.java {
+            srcDir 'src/main/java'
+            include 'com/lvonasek/arcore3dscanner/vr/**'
+            include 'com/lvonasek/utils/**'
+        }
+        quality.java.srcDir 'src/modern/java'
+        quality.jniLibs.srcDir qualityDirectory.map { it.dir('jni') }
     }
 }
 
 dependencies {
-    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
-    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
-    implementation 'com.squareup.retrofit2:converter-scalars:2.9.0'
-    implementation 'com.google.ar:core:1.31.0'
-    natives 'com.google.ar:core:1.31.0'
-    implementation 'com.huawei.hms:arenginesdk:3.5.0.1'
-    implementation files('src/main/libs/sdk-base-1.190.0.aar')
-    implementation 'net.openid:appauth:0.11.1'
+    // Retain the existing UI dependency versions during the native migration.
+    implementation 'com.google.android.material:material:1.9.0'
+    modernImplementation "com.google.ar:core:${arcoreVersions.modern}"
+    modernNatives "com.google.ar:core:${arcoreVersions.modern}"
+    legacyImplementation "com.google.ar:core:${arcoreVersions.legacy}"
+    legacyNatives "com.google.ar:core:${arcoreVersions.legacy}"
+    qualitySdk "com.google.ar:core:${arcoreVersions.legacy}"
+    qualityImplementation files(qualityDirectory.map { it.file('arcore-java.aar') }).builtBy(extractQualityBaseline)
+    qualityImplementation 'androidx.annotation:annotation:1.3.0'
+    legacyImplementation 'com.huawei.hms:arenginesdk:3.5.0.1'
+    legacyImplementation files('src/main/libs/sdk-base-1.190.0.aar')
 
-    implementation 'org.jcodec:jcodec:0.2.3'
-    implementation 'org.jcodec:jcodec-android:0.2.3'
+    implementation "org.jcodec:jcodec:${jcodecVersion}"
+    implementation "org.jcodec:jcodec-android:${jcodecVersion}"
 }
 
-task extractNativeLibraries() {
-    // Always extract, this insures the native libs are updated if the version changes.
-    outputs.upToDateWhen { false }
-    doFirst {
-        configurations.natives.files.each { f ->
-            copy {
-                from zipTree(f)
-                into arcore_libpath
-                include "jni/**/*"
+arcoreVersions.each { flavor, version ->
+    def nativeArtifacts = configurations.getByName("${flavor}Natives")
+    def destination = layout.buildDirectory.dir("arcore/${flavor}")
+    def extraction = tasks.register("extract${flavor.capitalize()}ArcoreNatives") {
+        inputs.files nativeArtifacts
+        outputs.dir destination
+        doLast {
+            // Resolve only when this flavor's extraction runs, not at configuration time.
+            project.sync {
+                from nativeArtifacts.collect { project.zipTree(it) }
+                include 'jni/**/libarcore_sdk_c.so'
+                into destination
             }
+        }
+    }
+    tasks.configureEach { task ->
+        // AGP 8.8 shares build-type/ABI task names across flavors (with numeric
+        // suffixes). Its configure tasks depend on the flavor-specific pre-build,
+        // so wire extraction there rather than guessing those internal suffixes.
+        if (task.name.startsWith("pre${flavor.capitalize()}") && task.name.endsWith('Build')) {
+            task.dependsOn extraction
+        }
+        if ((task.name.startsWith('generateJsonModel') || task.name.startsWith('externalNativeBuild')) &&
+                task.name.contains(flavor.capitalize()) && !task.name.contains('Clean')) {
+            task.dependsOn extraction
         }
     }
 }
 
-tasks.whenTaskAdded {
-    task-> if (task.name.contains("external") && !task.name.contains("Clean")) {
-        task.dependsOn(extractNativeLibraries)
-    }
+tasks.configureEach { task ->
+    if (task.name.startsWith('preQuality') && task.name.endsWith('Build')) task.dependsOn extractQualityBaseline
 }

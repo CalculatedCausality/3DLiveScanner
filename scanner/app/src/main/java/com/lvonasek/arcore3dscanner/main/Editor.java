@@ -1,6 +1,7 @@
 package com.lvonasek.arcore3dscanner.main;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -17,11 +18,14 @@ import android.widget.EditText;
 import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.lvonasek.arcore3dscanner.ui.AbstractActivity;
 import com.lvonasek.arcore3dscanner.R;
+import com.lvonasek.utils.IO;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 
 public class Editor extends View implements Button.OnClickListener, View.OnTouchListener {
@@ -58,6 +62,7 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
   private boolean mBackShown;
   private boolean mComplete;
   private boolean mInitialized;
+  private boolean mSaveInProgress;
 
   public Editor(Context context, AttributeSet attrs)
   {
@@ -135,23 +140,8 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
 
   private Rect normalizeRect(Rect input)
   {
-    Rect output = new Rect();
-    if (input.left > input.right) {
-      output.left = input.right;
-      output.right = input.left;
-    } else {
-      output.left = input.left;
-      output.right = input.right;
-    }
-
-    if (input.top > input.bottom) {
-      output.top = input.bottom;
-      output.bottom = input.top;
-    } else {
-      output.top = input.top;
-      output.bottom = input.bottom;
-    }
-    return output;
+    return new Rect(Math.min(input.left, input.right), Math.min(input.top, input.bottom),
+        Math.max(input.left, input.right), Math.max(input.top, input.bottom));
   }
 
   @Override
@@ -237,21 +227,13 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
         mDeselect.setVisibility(View.VISIBLE);
         mStatus = Status.SELECT_RECT;
       }
-      //select less
-      if (view.getId() == R.id.editor1e)
+      //select less/more
+      if (view.getId() == R.id.editor1e || view.getId() == R.id.editor1f)
       {
+        final boolean more = view.getId() == R.id.editor1f;
         mProgress.setVisibility(View.VISIBLE);
         new Thread(() -> {
-          JNI.multSelection(false);
-          mContext.runOnUiThread(() -> mProgress.setVisibility(View.GONE));
-        }).start();
-      }
-      //select more
-      if (view.getId() == R.id.editor1f)
-      {
-        mProgress.setVisibility(View.VISIBLE);
-        new Thread(() -> {
-          JNI.multSelection(true);
+          JNI.multSelection(more);
           mContext.runOnUiThread(() -> mProgress.setVisibility(View.GONE));
         }).start();
       }
@@ -259,46 +241,19 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
 
     //color editing
     if (mScreen == Screen.COLOR) {
-      if (view.getId() != R.id.editor0) {
-        if (mShowNormals)
-        {
-          mShowNormals = false;
-          JNI.showNormals(false);
-        }
+      if (view.getId() != R.id.editor0 && mShowNormals) {
+        mShowNormals = false;
+        JNI.showNormals(false);
       }
 
       if (view.getId() == R.id.editor2a)
-      {
-        mEffect = Effect.CONTRAST;
-        mStatus = Status.UPDATE_COLORS;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(false);
-      }
+        startEffect(Effect.CONTRAST, Status.UPDATE_COLORS, false);
       if (view.getId() == R.id.editor2b)
-      {
-        mEffect = Effect.GAMMA;
-        mStatus = Status.UPDATE_COLORS;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(false);
-      }
+        startEffect(Effect.GAMMA, Status.UPDATE_COLORS, false);
       if (view.getId() == R.id.editor2c)
-      {
-        mEffect = Effect.SATURATION;
-        mStatus = Status.UPDATE_COLORS;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(false);
-      }
+        startEffect(Effect.SATURATION, Status.UPDATE_COLORS, false);
       if (view.getId() == R.id.editor2d)
-      {
-        mEffect = Effect.TONE;
-        mStatus = Status.UPDATE_COLORS;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(false);
-      }
+        startEffect(Effect.TONE, Status.UPDATE_COLORS, false);
       if (view.getId() == R.id.editor2e)
       {
         mProgress.setVisibility(View.VISIBLE);
@@ -312,29 +267,11 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
     // transforming objects
     if (mScreen == Screen.TRANSFORM) {
       if (view.getId() == R.id.editor3a)
-      {
-        mEffect = Effect.MOVE;
-        mStatus = Status.UPDATE_TRANSFORM;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(true);
-      }
+        startEffect(Effect.MOVE, Status.UPDATE_TRANSFORM, true);
       if (view.getId() == R.id.editor3b)
-      {
-        mEffect = Effect.ROTATE;
-        mStatus = Status.UPDATE_TRANSFORM;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(true);
-      }
+        startEffect(Effect.ROTATE, Status.UPDATE_TRANSFORM, true);
       if (view.getId() == R.id.editor3c)
-      {
-        mEffect = Effect.SCALE;
-        mStatus = Status.UPDATE_TRANSFORM;
-        mBackShown = true;
-        mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
-        showSeekBar(false);
-      }
+        startEffect(Effect.SCALE, Status.UPDATE_TRANSFORM, false);
     }
 
     //view
@@ -407,34 +344,42 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
   }
 
   private void save() {
+    if (mSaveInProgress) return;
     //filename dialog
-    AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
+    AlertDialog.Builder builder = new MaterialAlertDialogBuilder(mContext);
     builder.setTitle(mContext.getString(R.string.enter_filename));
     final EditText input = new EditText(mContext);
     builder.setView(input);
     builder.setPositiveButton(mContext.getString(android.R.string.ok), (dialog, which) -> {
-      //delete old during overwrite
-      File file = new File(AbstractActivity.getPath(false), input.getText().toString() + Exporter.EXT_OBJ);
-      try {
-        if (file.exists())
-          for(String s : Exporter.getObjResources(file))
-            if (new File(AbstractActivity.getPath(false), s).delete())
-              Log.d(AbstractActivity.TAG, "File " + s + " deleted");
-      } catch(Exception e) {
-        e.printStackTrace();
-      }
+      if (mSaveInProgress) return;
+      final String filename = input.getText().toString().trim();
+      mSaveInProgress = true;
       mProgress.setVisibility(View.VISIBLE);
       new Thread(() -> {
-        long timestamp = System.currentTimeMillis();
-        final File obj = new File(AbstractActivity.getTempPath(), timestamp + Exporter.EXT_OBJ);
-        JNI.saveWithTextures(obj.getAbsolutePath().getBytes());
-        for(String s : Exporter.getObjResources(obj.getAbsoluteFile()))
-          if (new File(AbstractActivity.getTempPath(), s).renameTo(new File(AbstractActivity.getPath(false), s)))
-            Log.d(AbstractActivity.TAG, "File " + s + " saved");
-        final File file2save = new File(AbstractActivity.getPath(false), input.getText().toString() + Exporter.EXT_OBJ);
-        if (obj.renameTo(file2save))
-          Log.d(AbstractActivity.TAG, "Obj file " + file2save.toString() + " saved.");
-        mContext.runOnUiThread(() -> mProgress.setVisibility(View.GONE));
+        File staging = null;
+        boolean saved = false;
+        try {
+          if (filename.isEmpty()) throw new IOException("Missing model name");
+          File destination = IO.resolveContainedFile(new File(AbstractActivity.getPath(false)), filename + Exporter.EXT_OBJ);
+          if (destination.exists()) throw new IOException("Scan already exists");
+          staging = IO.createStagingDirectory(AbstractActivity.getScratchPath());
+          File obj = new File(staging, "edited.obj");
+          if (!JNI.saveWithTextures(obj.getAbsolutePath().getBytes())) throw new IOException("Native model write failed");
+          Exporter.export(obj, filename);
+          saved = true;
+        } catch (Exception failure) {
+          Log.e(AbstractActivity.TAG, "Unable to save edited model; existing scans retained", failure);
+        } finally {
+          if (staging != null) IO.deleteRecursive(staging);
+          final boolean success = saved;
+          mContext.runOnUiThread(() -> {
+            mSaveInProgress = false;
+            mProgress.setVisibility(View.GONE);
+            if (!mContext.isFinishing() && !mContext.isDestroyed()) {
+              Toast.makeText(mContext, success ? R.string.data_saved : R.string.storage_editor_failed, Toast.LENGTH_LONG).show();
+            }
+          });
+        }
       }).start();
       dialog.cancel();
     });
@@ -445,8 +390,6 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
   private void setMainScreen()
   {
     initButtons();
-    mBackShown = false;
-    mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_save_small);
     for (int i = BUTTON_SUBMENU_SELECT; i < mButtons.size(); i++) {
       mButtons.get(i).setVisibility(View.GONE);
     }
@@ -487,6 +430,15 @@ public class Editor extends View implements Button.OnClickListener, View.OnTouch
       mButtons.get(i).setVisibility(i >= BUTTON_SUBMENU_VIEW && i < BUTTON_X ? View.VISIBLE : View.GONE);
     }
     mScreen = Screen.EDIT;
+  }
+
+  private void startEffect(Effect effect, Status status, boolean axes)
+  {
+    mEffect = effect;
+    mStatus = status;
+    mBackShown = true;
+    mButtons.get(BUTTON_SAVE).setBackgroundResource(R.drawable.ic_back_small);
+    showSeekBar(axes);
   }
 
   private void showSeekBar(boolean axes)

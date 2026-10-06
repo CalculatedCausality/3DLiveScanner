@@ -19,6 +19,7 @@ import android.media.MediaRecorder;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.util.Log;
 
@@ -41,6 +42,8 @@ import java.nio.IntBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import javax.microedition.khronos.opengles.GL10;
 
@@ -53,23 +56,20 @@ public class Recorder {
     //video objects
     private static File mVideoFile;
     private static SequenceEncoder mVideoEncoder;
-    private static int mVideoFrames;
+    private static long mVideoFrames;
     private static SeekableByteChannel mVideoOut;
     private static long mVideoTimestamp;
 
-    //video dimensions
-    private static int mWidth;
-    private static int mHeight;
-    private static int mScale;
+    //locked orientation
     private static int mOrientation;
 
     //video capturing
-    private static int[] mBitmapBuffer;
-    private static int[] mBitmapSource;
-    private static IntBuffer mIntBuffer;
+    private static CaptureBuffer mCaptureBuffer;
     private static final Object mLock = new Object();
     private static boolean mRecording;
-    private static int mThreads;
+    // One admitted frame owns the readback/conversion buffers until encoding ends.
+    private static boolean mFramePending;
+    private static ExecutorService mVideoWorker;
 
     //settings
     private static File mCustomRoot = null;
@@ -99,65 +99,90 @@ public class Recorder {
             }
             catch (Exception e) {
                 e.printStackTrace();
+            } finally {
+                bitmap.recycle();
             }
         }
     }
 
     public static void captureVideoFrame(GL10 gl, GLESSurfaceView view, boolean addTimestamp, int frameSkip, boolean multithread) {
-        if (!isVideoRecording()) {
-            return;
-        }
-
-        int count = 0;
-        if (frameSkip <= 0) {
-            while (true) {
-                long expectedTimeStamp = mVideoTimestamp + mVideoFrames * 1000 / mVideoFPS;
-                boolean ok = expectedTimeStamp <= System.currentTimeMillis();
-                if (ok) {
-                    count++;
-                    mVideoFrames++;
-                } else {
-                    break;
-                }
+        final long count;
+        final SequenceEncoder encoder;
+        final ExecutorService worker;
+        synchronized (mLock) {
+            // Backpressure happens before GPU readback. Do not queue threads or
+            // overwrite pixels that an encoder is still consuming.
+            if (!mRecording || mVideoEncoder == null || mFramePending) return;
+            if (frameSkip <= 0) {
+                long elapsed = Math.max(0, SystemClock.elapsedRealtime() - mVideoTimestamp);
+                // Equivalent to the old timestamp loop, including its first frame.
+                long due = ((elapsed + 1) * mVideoFPS + 999) / 1000;
+                count = Math.max(0, due - mVideoFrames);
+                mVideoFrames += count;
+            } else {
+                count = mVideoFrames % frameSkip == 0 ? 1 : 0;
+                mVideoFrames++;
             }
-        } else {
-            count = mVideoFrames % frameSkip == 0 ? 1 : 0;
-            mVideoFrames++;
+            if (count == 0) return;
+            mFramePending = true;
+            encoder = mVideoEncoder;
+            worker = mVideoWorker;
         }
-        if (count > 0) {
+        boolean handedOff = false;
+        try {
             int w = view.getWidth();
             int h = view.getHeight();
             int s = Math.max(w, h) / mVideoDownscale + 1;
-            createCaches(w, h, s);
-            SimpleDateFormat formatterDate = new SimpleDateFormat("dd.MM.yyyy", Locale.US);
-            SimpleDateFormat formatterTime = new SimpleDateFormat("HH:mm", Locale.US);
-            String date = formatterDate.format(new Date(System.currentTimeMillis()));
-            String time = formatterTime.format(new Date(System.currentTimeMillis()));
-            gl.glReadPixels(0, 0, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, mIntBuffer);
-            mThreads++;
-            if (multithread) {
-                int finalCount = count;
-                Runnable r = () -> {
-                    captureFrame(w, h, s, date, time, finalCount, addTimestamp);
-                    mThreads--;
-                };
-                if (frameSkip <= 0) {
-                    new Thread(r).start();
-                } else {
-                    r.run();
-                }
-            } else {
-                captureFrame(w, h, s, date, time, count, addTimestamp);
-                mThreads--;
+            if (mCaptureBuffer == null || !mCaptureBuffer.matches(w, h, s)) {
+                if (mCaptureBuffer != null) mCaptureBuffer.recycle();
+                mCaptureBuffer = null;
+                mCaptureBuffer = new CaptureBuffer(w, h, s);
             }
+            final CaptureBuffer buffer = mCaptureBuffer;
+            final long timestamp = System.currentTimeMillis();
+            buffer.readBuffer.position(0);
+            gl.glReadPixels(0, 0, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, buffer.readBuffer);
+            Runnable task = () -> {
+                try {
+                    captureFrame(buffer, encoder, timestamp, count, addTimestamp);
+                } finally {
+                    finishFrame();
+                }
+            };
+            if (multithread && frameSkip <= 0) {
+                worker.execute(task);
+                handedOff = true;
+            } else {
+                handedOff = true;
+                task.run();
+            }
+        } catch (RuntimeException | Error e) {
+            if (!handedOff) finishFrame();
+            throw e;
+        }
+    }
+
+    private static void finishFrame() {
+        synchronized (mLock) {
+            mFramePending = false;
+            mLock.notifyAll();
         }
     }
 
     public static boolean isVideoRecording() {
-        return mRecording && mVideoEncoder != null;
+        synchronized (mLock) {
+            return mRecording && mVideoEncoder != null;
+        }
     }
 
     public static void startCapturingVideo(Activity context, boolean recordAudio) {
+        synchronized (mLock) {
+            if (mRecording || mVideoEncoder != null) return;
+            startCapturingVideoLocked(context, recordAudio);
+        }
+    }
+
+    private static void startCapturingVideoLocked(Activity context, boolean recordAudio) {
 
         //lock screen orientation
         mOrientation = context.getRequestedOrientation();
@@ -188,7 +213,7 @@ public class Recorder {
             mVideoOut = NIOUtils.writableFileChannel(mVideoFile.getAbsolutePath());
             mVideoEncoder = new SequenceEncoder(mVideoOut, fps, Format.MOV, Codec.H264, null);
             mVideoFrames = 0;
-            mVideoTimestamp = System.currentTimeMillis();
+            mVideoTimestamp = SystemClock.elapsedRealtime();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -197,42 +222,64 @@ public class Recorder {
         if (recordAudio) {
             try {
                 mAudioEncoder.start();
-                mVideoTimestamp = System.currentTimeMillis();
+                mVideoTimestamp = SystemClock.elapsedRealtime();
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
-        mRecording = true;
+        mVideoWorker = Executors.newSingleThreadExecutor();
+        mRecording = mVideoEncoder != null;
     }
 
     public static void stopCapturingVideo(Activity context, boolean saveIntoGallery) {
 
         //cancel recording
-        mRecording = false;
+        synchronized (mLock) {
+            mRecording = false;
+        }
 
         //stop audio
         if (mAudioEncoder != null) {
-            mAudioEncoder.stop();
-            mAudioEncoder.release();
-            mAudioEncoder = null;
+            try {
+                mAudioEncoder.stop();
+            } catch (RuntimeException e) {
+                e.printStackTrace();
+            } finally {
+                mAudioEncoder.release();
+                mAudioEncoder = null;
+            }
         }
 
         //stop video
-        try {
-            while (mThreads > 0) {
+        boolean interrupted = false;
+        synchronized (mLock) {
+            while (mFramePending) {
                 try {
-                    Thread.sleep(10);
+                    mLock.wait();
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    // Finish the admitted frame before closing its encoder.
+                    interrupted = true;
                 }
             }
-            mVideoEncoder.finish();
-            mVideoOut.close();
-            mVideoEncoder = null;
-            mVideoOut = null;
-        } catch (Exception e) {
-            e.printStackTrace();
+            try {
+                if (mVideoEncoder != null) mVideoEncoder.finish();
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                try {
+                    if (mVideoOut != null) mVideoOut.close();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                mVideoEncoder = null;
+                mVideoOut = null;
+                if (mVideoWorker != null) mVideoWorker.shutdown();
+                mVideoWorker = null;
+                if (mCaptureBuffer != null) mCaptureBuffer.recycle();
+                mCaptureBuffer = null;
+            }
         }
+        if (interrupted) Thread.currentThread().interrupt();
 
         //mix files
         if (saveIntoGallery) {
@@ -269,48 +316,74 @@ public class Recorder {
         mVideoFPS = fps;
     }
 
-    private static Bitmap createBitmapFromBitmapBuffer(int w, int h, int[] bitmapBuffer, int s) {
-        int ws = w / s;
-        int hs = h / s;
-        if (ws % 2 == 1) ws--;
-        if (hs % 2 == 1) hs--;
-
-        try {
-            int offset1, offset2, texturePixel;
-            for (int i = 0; i < hs; i++) {
-                offset1 = i * s * w;
-                offset2 = (hs - i - 1) * ws;
-                for (int j = 0; j < ws; j++) {
-                    texturePixel = bitmapBuffer[offset1 + j * s];
-                    mBitmapSource[offset2 + j] = (texturePixel & 0xff00ff00) | (texturePixel << 16) & 0x00ff0000 | (texturePixel >> 16) & 0xff;
-                }
-            }
-        } catch (Exception e) {
-            return null;
-        }
-        return Bitmap.createBitmap(mBitmapSource, ws, hs, Bitmap.Config.ARGB_8888);
-    }
-
     private static Bitmap createBitmapFromGLSurface(int x, int y, int w, int h, GL10 gl, int s) {
-        createCaches(w, h, s);
-        gl.glReadPixels(x, y, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, mIntBuffer);
-        return createBitmapFromBitmapBuffer(w, h, mBitmapBuffer, s);
+        // A photo must not overwrite a video frame currently being encoded.
+        CaptureBuffer buffer = new CaptureBuffer(w, h, s);
+        gl.glReadPixels(x, y, w, h, GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, buffer.readBuffer);
+        return buffer.toBitmap();
     }
 
-    private static void createCaches(int w, int h, int s) {
-        if ((w != mWidth) || (h != mHeight) || (s != mScale)) {
-            int ws = w / s;
-            int hs = h / s;
+    private static class CaptureBuffer {
+        final int width, height, scale, outputWidth, outputHeight;
+        final int[] pixels, converted;
+        final IntBuffer readBuffer;
+        final Bitmap bitmap;
+        private Picture picture;
+        private Canvas canvas;
+        private Paint paint;
+        private SimpleDateFormat dateFormat, timeFormat;
+
+        CaptureBuffer(int w, int h, int s) {
+            width = w;
+            height = h;
+            scale = s;
+            int ws = w / s, hs = h / s;
             if (ws % 2 == 1) ws--;
             if (hs % 2 == 1) hs--;
-            mBitmapSource = new int[ws * hs];
-            mBitmapBuffer = new int[w * h];
-            mIntBuffer = IntBuffer.wrap(mBitmapBuffer);
-            mWidth = w;
-            mHeight = h;
-            mScale = s;
+            outputWidth = ws;
+            outputHeight = hs;
+            converted = new int[ws * hs];
+            pixels = new int[w * h];
+            readBuffer = IntBuffer.wrap(pixels);
+            bitmap = Bitmap.createBitmap(ws, hs, Bitmap.Config.ARGB_8888);
         }
-        mIntBuffer.position(0);
+
+        boolean matches(int w, int h, int s) {
+            return width == w && height == h && scale == s;
+        }
+
+        Bitmap toBitmap() {
+            for (int i = 0; i < outputHeight; i++) {
+                int source = i * scale * width;
+                int target = (outputHeight - i - 1) * outputWidth;
+                for (int j = 0; j < outputWidth; j++) {
+                    int pixel = pixels[source + j * scale];
+                    converted[target + j] = (pixel & 0xff00ff00)
+                            | (pixel << 16) & 0x00ff0000 | (pixel >> 16) & 0xff;
+                }
+            }
+            bitmap.setPixels(converted, 0, outputWidth, 0, 0, outputWidth, outputHeight);
+            return bitmap;
+        }
+
+        void drawTimestamp(long timestamp) {
+            if (canvas == null) {
+                canvas = new Canvas(bitmap);
+                paint = new Paint();
+                paint.setAntiAlias(true);
+                paint.setColor(Color.WHITE);
+                paint.setTextSize(16);
+                dateFormat = new SimpleDateFormat("dd.MM.yyyy", Locale.US);
+                timeFormat = new SimpleDateFormat("HH:mm", Locale.US);
+            }
+            Date date = new Date(timestamp);
+            canvas.drawText(dateFormat.format(date), 16, 16, paint);
+            canvas.drawText(timeFormat.format(date), 16, 16 + paint.getTextSize(), paint);
+        }
+
+        void recycle() {
+            bitmap.recycle();
+        }
     }
 
     private static Uri getFile(Context context, boolean video) {
@@ -443,34 +516,21 @@ public class Recorder {
         }
     }
 
-    private static void captureFrame(int w, int h, int s, String date, String time, int count, boolean addTimestamp) {
-        synchronized (mLock) {
-            if (isVideoRecording()) {
-                Bitmap bitmap = createBitmapFromBitmapBuffer(w, h, mBitmapBuffer, s);
-                if (bitmap != null) {
-                    try {
-                        Picture picture;
-                        if (addTimestamp) {
-                            Paint paint = new Paint();
-                            paint.setAntiAlias(true);
-                            paint.setColor(Color.WHITE);
-                            paint.setTextSize(16);
-                            Bitmap mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-                            Canvas canvas = new Canvas(mutableBitmap);
-                            canvas.drawText(date, 16, 16, paint);
-                            canvas.drawText(time, 16, 16 + paint.getTextSize(), paint);
-                            picture = BitmapUtil.fromBitmap(mutableBitmap);
-                        } else {
-                            picture = BitmapUtil.fromBitmap(bitmap);
-                        }
-                        for (int i = 0; i < count; i++) {
-                            mVideoEncoder.encodeNativeFrame(picture);
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
+    private static void captureFrame(CaptureBuffer buffer, SequenceEncoder encoder, long timestamp,
+                                     long count, boolean addTimestamp) {
+        try {
+            Bitmap bitmap = buffer.toBitmap();
+            if (addTimestamp) buffer.drawTimestamp(timestamp);
+            if (buffer.picture == null) {
+                buffer.picture = BitmapUtil.fromBitmap(bitmap);
+            } else {
+                BitmapUtil.fromBitmap(bitmap, buffer.picture);
             }
+            for (long i = 0; i < count; i++) {
+                encoder.encodeNativeFrame(buffer.picture);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 

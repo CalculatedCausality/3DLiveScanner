@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="texturing_failed">Texturing failed. Check texture settings and available memory. Your source model and scan data have been kept so you can retry.</string>
+    <string name="texturing_failed_details">Texturing failed: %1$s Your source model and scan data have been kept.</string>
+    <string name="model_generation_failed">The captured data could not be reconstructed or saved as a model. Your scan data has been kept so you can retry.</string>
+</resources>

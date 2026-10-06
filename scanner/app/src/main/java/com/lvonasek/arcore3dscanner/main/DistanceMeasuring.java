@@ -56,7 +56,7 @@ public class DistanceMeasuring extends View
         reset();
         return;
       }
-      String text = "";
+      String text;
       if (value > 1)
         text = String.format(Locale.US, "%.2f", value) + "m";
       else

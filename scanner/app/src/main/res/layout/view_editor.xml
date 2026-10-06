@@ -18,7 +18,7 @@
 
         <View
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="48dp"
             android:background="#B0000000"/>
 
 
@@ -32,10 +32,11 @@
             <Button
                 android:id="@+id/editor0"
                 android:layout_width="60dp"
-                android:layout_height="40dp"
+                android:layout_height="48dp"
                 android:layout_marginLeft="10dp"
                 android:layout_marginRight="10dp"
-                android:background="@drawable/ic_back_small" />
+                android:background="@drawable/ic_back_small"
+                android:contentDescription="@string/action_save_editor" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -53,13 +54,13 @@
                     <Button
                         android:id="@+id/editor4"
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="48dp"
                         android:background="@android:color/transparent"
                         android:ellipsize="end"
                         android:maxLines="1"
                         android:text="@string/editor_main_edit"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor4a"
@@ -70,7 +71,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_edit_undo"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor4b"
@@ -81,7 +82,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_transform_clone"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor4c"
@@ -92,7 +93,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_transform_delete"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor4d"
@@ -103,7 +104,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_edit_visualisation"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -116,13 +117,13 @@
                     <Button
                         android:id="@+id/editor1"
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="48dp"
                         android:background="@android:color/transparent"
                         android:ellipsize="end"
                         android:maxLines="1"
                         android:text="@string/editor_main_select"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor1a"
@@ -133,7 +134,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_select_all"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor1b"
@@ -144,7 +145,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_select_object"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor1c"
@@ -155,7 +156,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_select_circle"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor1d"
@@ -166,7 +167,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_select_rect"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor1e"
@@ -177,7 +178,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_select_less"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor1f"
@@ -188,7 +189,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_select_more"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -201,13 +202,13 @@
                     <Button
                         android:id="@+id/editor2"
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="48dp"
                         android:background="@android:color/transparent"
                         android:ellipsize="end"
                         android:maxLines="1"
                         android:text="@string/editor_main_colors"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor2a"
@@ -218,7 +219,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_colors_contrast"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor2b"
@@ -229,7 +230,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_colors_gamma"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor2c"
@@ -240,7 +241,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_colors_saturation"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor2d"
@@ -251,7 +252,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_colors_tone"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor2e"
@@ -262,7 +263,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_colors_reset"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -275,13 +276,13 @@
                     <Button
                         android:id="@+id/editor3"
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="48dp"
                         android:background="@android:color/transparent"
                         android:ellipsize="end"
                         android:maxLines="1"
                         android:text="@string/editor_main_transform"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor3a"
@@ -292,7 +293,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_transform_move"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor3b"
@@ -303,7 +304,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_transform_rotate"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
 
                     <Button
                         android:id="@+id/editor3c"
@@ -314,7 +315,7 @@
                         android:maxLines="1"
                         android:text="@string/editor_transform_scale"
                         android:textColor="@android:color/white"
-                        android:textSize="15dp" />
+                        android:textSize="15sp" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -335,7 +336,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:textColor="@android:color/white"
-                android:textSize="15dp" />
+                android:textSize="15sp" />
 
             <Button
                 android:id="@+id/editorY"
@@ -344,7 +345,7 @@
                 android:layout_weight="1000"
                 android:background="@android:color/transparent"
                 android:textColor="@android:color/white"
-                android:textSize="15dp" />
+                android:textSize="15sp" />
 
             <Button
                 android:id="@+id/editorZ"
@@ -353,7 +354,7 @@
                 android:layout_weight="1000"
                 android:background="@android:color/transparent"
                 android:textColor="@android:color/white"
-                android:textSize="15dp" />
+                android:textSize="15sp" />
 
             <TextView
                 android:id="@+id/editorMsg"
@@ -362,7 +363,7 @@
                 android:layout_weight="1000"
                 android:gravity="center"
                 android:textColor="@android:color/white"
-                android:textSize="15dp"
+                android:textSize="15sp"
                 android:visibility="gone" />
 
             <CheckBox
@@ -373,7 +374,7 @@
                 android:paddingRight="5dp"
                 android:text="@string/editor_deselect"
                 android:textColor="@android:color/white"
-                android:textSize="15dp"
+                android:textSize="15sp"
                 android:visibility="gone" />
         </LinearLayout>
     </RelativeLayout>

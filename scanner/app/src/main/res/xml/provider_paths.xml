@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="private_scans" path="scans/" />
+    <external-files-path name="app_scans" path="Documents/3D Live Scanner/" />
+    <cache-path name="model_shares" path="model-shares/"/>
+    <cache-path name="scanner_work" path="scanner-work/"/>
     <external-path name="external_files" path="."/>
 </paths>

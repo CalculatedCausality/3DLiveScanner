@@ -55,8 +55,10 @@ class FolderAdapter extends BaseAdapter
   @Override
   public View getView(final int index, View view, ViewGroup viewGroup)
   {
-    LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-    view = inflater.inflate(R.layout.view_folder, null, true);
+    if (view == null) {
+      LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+      view = inflater.inflate(R.layout.view_folder, viewGroup, false);
+    }
     String key = (String)getItem(index);
     TextView name = view.findViewById(R.id.name);
     name.setText(key);
@@ -74,15 +76,15 @@ class FolderAdapter extends BaseAdapter
 
     //set open action
     view.setOnClickListener(v -> {
-      if (key.compareTo(mContext.getString(R.string.folder_new)) == 0) {
-        File folder = new File(mPath, mContext.getString(R.string.folder_new));
-        folder.mkdir();
-        mContext.refreshUI();
-        mPath = folder.getAbsolutePath();
-      } else if (key.compareTo(mContext.getString(R.string.folder_up)) == 0) {
+      if (key.compareTo(mContext.getString(R.string.folder_up)) == 0) {
         mPath = new File(mPath).getParentFile().getAbsolutePath();
       } else {
-        mPath = new File(mPath, key).getAbsolutePath();
+        File folder = new File(mPath, key);
+        if (key.compareTo(mContext.getString(R.string.folder_new)) == 0) {
+          folder.mkdir();
+          mContext.refreshUI();
+        }
+        mPath = folder.getAbsolutePath();
       }
       mListener.onPathChanged(mPath);
       update();
@@ -91,24 +93,14 @@ class FolderAdapter extends BaseAdapter
     return view;
   }
 
-  void addItem(String name)
-  {
-    mItems.add(name);
-  }
-
-  void clearItems()
-  {
-    mItems.clear();
-  }
-
   public String getPath() {
     return new File(mPath).getAbsolutePath();
   }
 
   public void update() {
-    clearItems();
+    mItems.clear();
     if ((getPath() + "/").compareTo(AbstractActivity.getPath(false)) != 0) {
-      addItem(mContext.getString(R.string.folder_up));
+      mItems.add(mContext.getString(R.string.folder_up));
     }
 
     boolean newFolderExist = false;
@@ -120,18 +112,15 @@ class FolderAdapter extends BaseAdapter
           newFolderExist = true;
         }
         File f = new File(getPath(), s);
-        if (f.isDirectory()) {
-          if (Exporter.isFolder(s)) {
-            if (f.getAbsolutePath().compareTo(mContext.getTempPath().getAbsolutePath()) != 0) {
-              addItem(s);
-            }
-          }
+        if (f.isDirectory() && Exporter.isFolder(s)
+                && !f.getAbsolutePath().equals(mContext.getTempPath().getAbsolutePath())) {
+          mItems.add(s);
         }
       }
     }
 
     if (!newFolderExist) {
-      addItem(mContext.getString(R.string.folder_new));
+      mItems.add(mContext.getString(R.string.folder_new));
     }
     notifyDataSetChanged();
   }
