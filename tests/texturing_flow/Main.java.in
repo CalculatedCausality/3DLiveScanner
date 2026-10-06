@@ -1,0 +1,71 @@
+import java.io.File;
+import java.nio.file.Files;
+
+// FAILURE-INJECTED Java boundaries. The executed postprocess body is extracted unchanged.
+public class Main {
+  static class View { static final int GONE=8; int visibility; void setVisibility(int v) { visibility=v; } }
+  static class GL { int stops; void stop() { stops++; } }
+  static class Intent { Intent(Main m, Class<?> c) {} }
+  static class FileManager {}
+  static class R { static class string { static final int texturing_failed=1, texturing_failed_details=2, model_generation_failed=3; } }
+  static class Exporter { static final String EXT_OBJ=".obj"; static final int EXPORT_TYPE_FLOORPLAN=0, EXPORT_TYPE_POINTCLOUD=1; }
+  static class JNI {
+    static boolean result, saveResult=true, motionTrackingMessages, historyFailed; static int calls, saves, recovery;
+    static boolean texturize(byte[] i, byte[] o, boolean p, boolean t) { calls++; return result; }
+    static boolean save(byte[] i) { saves++; return saveResult; }
+    static boolean didHistoryFail() { return historyFailed; }
+    static int getRecoveryState() { return recovery; }
+    static String getTexturingError() { return "Injected backend failure"; }
+    static void onUndoButtonClicked(boolean a, boolean b) {}
+    static void extract(byte[] p, int t) {}
+  }
+  static class Service {
+    static int resets, finishes; static String link;
+    static void reset(Main m) { resets++; link=""; }
+    static void finish(String s) { finishes++; link=s; }
+  }
+  GL mGLView=new GL(); View mProgress=new View(), mLayoutWait=new View();
+  String mToPostprocess; boolean mIgnoreSaving; int finished, navigated;
+  boolean isFaceModeOn(Main m) { return false; }
+  void runOnUiThread(Runnable r) { r.run(); }
+  void startActivity(Intent i) { navigated++; }
+  void finish() { finished++; }
+  String getString(int resource, Object... args) { return resource + java.util.Arrays.toString(args); }
+  void process(File input, File obj) {
+    String export="realtime"; boolean poiss=false, analy=false;
+    Runnable body=() -> {
+// PRODUCTION_POSTPROCESS
+    };
+    body.run();
+  }
+  public static void main(String[] args) throws Exception {
+    File input=new File(args[0], "java-source.obj"), output=new File(args[0], "java-output.obj");
+    Files.write(input.toPath(), "retain".getBytes());
+    for (boolean success : new boolean[]{false,true}) {
+      Service.resets=Service.finishes=JNI.calls=0; JNI.result=success;
+      Main main=new Main(); main.process(input, output);
+      assert main.mGLView.stops == 1;
+      assert JNI.calls == 1;
+      assert Service.finishes == (success ? 1 : 0);
+      assert Service.resets == (success ? 0 : 1);
+      if (!success) {
+        assert main.mProgress.visibility == View.GONE && main.mLayoutWait.visibility == View.GONE;
+        assert main.navigated == 1 && main.mIgnoreSaving && JNI.motionTrackingMessages;
+        assert Service.link.isEmpty() && android.widget.Toast.shown > 0;
+        assert android.widget.Toast.lastMessage.contains("Injected backend failure");
+      }
+      assert new String(Files.readAllBytes(input.toPath())).equals("retain");
+    }
+    Service.resets=Service.finishes=JNI.calls=0; JNI.saveResult=false;
+    Main main=new Main(); main.mToPostprocess=args[0]; main.process(input, output);
+    assert JNI.calls == 0 && Service.resets == 1 && Service.finishes == 0;
+    assert android.widget.Toast.lastMessage.equals(main.getString(R.string.model_generation_failed));
+    for (boolean historyFailure : new boolean[]{false,true}) {
+      Service.resets=Service.finishes=JNI.calls=JNI.saves=0;
+      JNI.historyFailed=historyFailure; JNI.recovery=historyFailure ? 0 : 2;
+      main=new Main(); main.mToPostprocess=args[0]; main.process(input, output);
+      assert JNI.calls == 0 && JNI.saves == 0 && Service.resets == 1 && Service.finishes == 0;
+    }
+    System.out.println("PASS: exact Main postprocess body, failure restores UI without publishing success");
+  }
+}

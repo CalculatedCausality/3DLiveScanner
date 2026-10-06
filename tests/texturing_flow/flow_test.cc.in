@@ -1,0 +1,507 @@
+#include <cassert>
+#include <atomic>
+#include <cerrno>
+#include <cmath>
+#include <climits>
+#include <cstdio>
+#include <cstdarg>
+#include <cstring>
+#include <fstream>
+#include <functional>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <sstream>
+#include <stdexcept>
+#include <thread>
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <tango_3d_reconstruction_api.h>
+#include <turbojpeg.h>
+#include <data/dataset.h>
+#if SCANNER_MODERN
+#include <dataset_texturing.h>
+#endif
+static std::string diagnostic;
+static void logError(const char* format, ...) {
+    char buffer[1024]; va_list args; va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args); va_end(args);
+    diagnostic = buffer;
+}
+#define LOGE(...) logError(__VA_ARGS__)
+#define LOGI(...) ((void)0)
+
+// FAILURE-INJECTED BOUNDARIES: Tango C API, texture-alpha I/O, analyser, Poisson,
+// scan clearing and binder/render integration. C API structs and GLM are real.
+static std::string failure, badOutput;
+static int contexts = 0, configs = 0, meshes = 0, updates = 0, saves = 0;
+static int alphaImages = 0;
+static int streamedExports = 0;
+static std::string lastStreamAsset;
+static std::function<void()> exportBoundaryCheck;
+static int configCreates = 0;
+static std::map<std::string, int32_t> options;
+static int failUpdate = 0;
+static bool throws = false;
+static std::string poissonPath;
+static bool externalFixture = false;
+static std::vector<std::vector<unsigned char>> expectedFrames;
+static const std::string validObj = "\n# keep\n  v 1.123456789012345 2.23456789012345 3.3456789012345 1\n"
+    "v 0 0 0\nv 1 1 1\nvn 0.123456789012345 0.23456789012345 0.3456789012345\n"
+    "vt 0.123456789012345 0.987654321098765\nf 1/1/1 2/1/1 3/1/1\n";
+static void writeFile(const std::string& path, const std::string& content) { std::ofstream(path) << content; }
+static std::string readFile(const std::string& path) { std::ifstream in(path); return std::string(std::istreambuf_iterator<char>(in), {}); }
+struct _Tango3DR_Config {};
+struct _Tango3DR_TexturingContext { int frames = 0; };
+static Tango3DR_Status status(const char* point) { return failure == point ? TANGO_3DR_ERROR : TANGO_3DR_SUCCESS; }
+static void allocateMesh(Tango3DR_Mesh* mesh) {
+    *mesh = {}; mesh->num_vertices = 3; mesh->num_faces = 1;
+    mesh->vertices = new Tango3DR_Vector3[3]{}; mesh->faces = new Tango3DR_Face[1]{}; ++meshes;
+}
+extern "C" {
+Tango3DR_Config Tango3DR_Config_create(Tango3DR_ConfigType) {
+    ++configCreates; options.clear();
+    if (failure == "config") return nullptr;
+    ++configs; return new _Tango3DR_Config;
+}
+Tango3DR_Status Tango3DR_Config_destroy(Tango3DR_Config config) { assert(config); delete config; --configs; return status("config_destroy"); }
+Tango3DR_Status Tango3DR_Config_setInt32(Tango3DR_Config, const char* key, int32_t value) { options[key] = value; return status(key); }
+Tango3DR_Status Tango3DR_Config_setDouble(Tango3DR_Config, const char* key, double) { return status(key); }
+Tango3DR_TexturingContext Tango3DR_TexturingContext_create(Tango3DR_Config, const Tango3DR_Mesh*) {
+#if SCANNER_MODERN
+    // Contract-enforcing boundary, not a stand-in claim of real backend execution.
+    assert(options["texturing_backend"] == 0 && options["mesh_simplification_factor"] == 1);
+    assert(options["texture_size"] >= 16 && options["texture_size"] <= 4096);
+    assert(options["max_num_textures"] >= 0 && options["max_num_textures"] <= 8);
+    assert(uint64_t(options["max_num_textures"]) * options["texture_size"] * options["texture_size"] <= 16777216);
+#endif
+    if (failure == "context") return nullptr;
+    ++contexts; return new _Tango3DR_TexturingContext;
+}
+Tango3DR_Status Tango3DR_TexturingContext_destroy(Tango3DR_TexturingContext context) {
+    assert(context); delete context; --contexts; return status("context_destroy");
+}
+Tango3DR_Status Tango3DR_TexturingContext_setColorCalibration(Tango3DR_TexturingContext, const Tango3DR_CameraCalibration*) { return status("calibration"); }
+Tango3DR_Status Tango3DR_ReconstructionContext_setColorCalibration(Tango3DR_ReconstructionContext, const Tango3DR_CameraCalibration*) { return TANGO_3DR_SUCCESS; }
+Tango3DR_Status Tango3DR_Mesh_loadFromObj(const char*, Tango3DR_Mesh* mesh) {
+    allocateMesh(mesh); if (failure == "empty") mesh->num_faces = 0; return status("load");
+}
+Tango3DR_Status Tango3DR_Mesh_destroy(Tango3DR_Mesh* mesh) {
+    if (mesh->vertices) --meshes;
+    delete[] mesh->vertices; delete[] mesh->faces; *mesh = {}; return status("mesh_destroy");
+}
+Tango3DR_Status Tango3DR_updateTexture(Tango3DR_TexturingContext context, const Tango3DR_ImageBuffer* image, const Tango3DR_Pose* pose) {
+    const unsigned dimension = externalFixture ? 64 : 4;
+    assert(image->data && image->width == dimension && image->height == dimension && image->stride == dimension);
+    assert(image->format == TANGO_3DR_HAL_PIXEL_FORMAT_YCrCb_420_SP && pose->orientation[3] == 1);
+    if (externalFixture) {
+        assert(updates < int(expectedFrames.size()));
+        assert(std::equal(expectedFrames[updates].begin(), expectedFrames[updates].end(), image->data));
+        assert(std::fabs(pose->translation[0] - .08 * (updates - 1)) < 1e-7);
+        assert(pose->translation[1] == 0 && pose->translation[2] == 0);
+        assert(pose->orientation[0] == 0 && pose->orientation[1] == 0 && pose->orientation[2] == 0);
+    }
+    volatile unsigned char last = image->data[dimension * dimension * 3 / 2 - 1]; (void)last; ++updates;
+    if (throws) throw std::runtime_error("injected update exception");
+    ++context->frames;
+    return (failUpdate == updates) ? TANGO_3DR_ERROR : status("update");
+}
+Tango3DR_Status Tango3DR_getTexturedMesh(Tango3DR_TexturingContext context, Tango3DR_Mesh* mesh) {
+#if SCANNER_MODERN
+    if (!context->frames) return TANGO_3DR_ERROR;
+#endif
+    allocateMesh(mesh); return status("get");
+}
+Tango3DR_Status Tango3DR_Mesh_saveToObj(const Tango3DR_Mesh*, const char* path) {
+    ++saves;
+    if (failure == "save") return TANGO_3DR_ERROR;
+    if (failure == "missing_output") { remove(path); return TANGO_3DR_SUCCESS; }
+    writeFile(path, badOutput.empty() ? validObj : badOutput); return TANGO_3DR_SUCCESS;
+}
+}
+namespace oc {
+#if SCANNER_MODERN
+// Inject only the large-export boundary here. Real codec, visibility and
+// full-geometry tests for this backend live in tests/dataset_texturing.
+bool ExportDatasetTexturedObj(const std::string&, const std::string& output,
+        Dataset*, const DatasetTextureSettings& options,
+        const DatasetTextureProgress& progress, DatasetTextureReport& report) {
+    ++streamedExports;
+    if (exportBoundaryCheck) exportBoundaryCheck();
+    assert(options.textureSize == 2048 && options.textureCount == 4);
+    if (throws) throw std::runtime_error("injected streaming export exception");
+    if (failure == "missing_output") { remove(output.c_str()); return true; }
+    if (!failure.empty()) { report.error = "Injected streaming texturing failure"; return false; }
+    writeFile(output,badOutput.empty() ? validObj : badOutput);
+    lastStreamAsset = output + ".asset";
+    writeFile(lastStreamAsset,"injected texture resource");
+    report.faces = report.observedFaces = 1;
+    report.artifacts.push_back(output);
+    report.artifacts.push_back(lastStreamAsset);
+    progress("IMAGE",1);
+    return true;
+}
+#endif
+class Image {
+public:
+    static bool JPG2YUV(std::string, unsigned char*, int, int);
+    int GetWidth() { return 4; } int GetHeight() { return 4; }
+    bool IsValid() { return failure != "alpha_read"; }
+    bool Write(std::string) { return failure != "alpha_write"; }
+    int GetColor(int, int) { return 0; }
+    void DrawPixel(int, int, glm::ivec4) {}
+    std::string GetName() { return "injected-texture"; }
+};
+struct Mesh {
+    Image* image; bool imageOwner; std::vector<glm::vec3> vertices;
+    void Destroy() { if (image) { delete image; image = nullptr; --alphaImages; } }
+};
+class File3d {
+public:
+    File3d(std::string, bool) {}
+    void ReadModel(int, std::vector<Mesh>& out) { ++alphaImages; out.push_back({new Image, true, {glm::vec3(0)}}); }
+};
+}
+// PRODUCTION_HEADER
+namespace oc {
+class Reconstruction {
+public:
+    TangoTexturize texturize;
+    Dataset* dataset = nullptr;
+    std::mutex render_mutex_;
+    std::mutex event_mutex_;
+    std::mutex binder;
+    int locks = 0, unlocks = 0;
+    bool lost = true;
+    bool paused = true;
+    struct Scan { void Clear() {} } scan;
+    void BinderLock() { binder.lock(); ++locks; }
+    void BinderUnlock() { ++unlocks; binder.unlock(); }
+    bool InitTexturing(std::string, bool);
+};
+class Poisson { public: void Process(std::string path) { poissonPath = path; if (throws) throw std::runtime_error("Poisson injected"); } };
+class Texturize {
+public:
+    void SetCallback(void(*)(int,int)) {}
+    void Process(Dataset*, std::string, bool) { if (throws) throw std::runtime_error("analysis injected"); }
+    std::vector<int> GetFrames() { return failure == "empty_subset" ? std::vector<int>{} : std::vector<int>{0}; }
+};
+static void AnalyseCallback(int, int) {}
+class App {
+public:
+    Reconstruction reconstruction;
+    std::string texturing_error;
+    int export_texture_size = 2048, export_texture_count = 4;
+    std::string export_scratch_directory;
+    std::atomic<bool> offline_export{false};
+    std::mutex texturing_result_mutex;
+    struct Camera { int pauses = 0; void OnPause() { ++pauses; } } camera;
+    Camera* ar = &camera;
+    void SetEvent(std::string value) { reconstruction.texturize.SetEvent(value); }
+    bool Texturize(std::string, std::string, bool, bool);
+};
+}
+// PRODUCTION_WRAPPER
+// FAILURE-INJECTED libc/decoder boundaries, restricted to extracted definitions.
+static std::string ioFailure;
+static int testFseek(FILE* f, long n, int origin) { return ioFailure == "seek" ? -1 : fseek(f, n, origin); }
+static long testFtell(FILE* f) { return ioFailure == "tell" ? -1 : ftell(f); }
+static size_t testFread(void* p, size_t s, size_t n, FILE* f) { return ioFailure == "read" ? 0 : fread(p, s, n, f); }
+static int testFclose(FILE* f) { int result = fclose(f); return ioFailure == "close" ? EOF : result; }
+static size_t testFwrite(const void* p, size_t s, size_t n, FILE* f) { return ioFailure == "write" ? 0 : fwrite(p, s, n, f); }
+static int testFflush(FILE* f) { return ioFailure == "flush" ? EOF : fflush(f); }
+static int testFsync(int fd) { return ioFailure == "sync" ? -1 : fsync(fd); }
+static int testRename(const char* a, const char* b) { return ioFailure == "rename" ? -1 : rename(a, b); }
+static int testMkstemp(char* path) { return ioFailure == "temporary" ? -1 : mkstemp(path); }
+static int testMkstemps(char* path, int suffix) { return ioFailure == "temporary" ? -1 : mkstemps(path, suffix); }
+static tjhandle testInitDecompress() { return ioFailure == "decoder" ? nullptr : tjInitDecompress(); }
+#define fseek testFseek
+#define ftell testFtell
+#define fread testFread
+#define fclose testFclose
+#define fwrite testFwrite
+#define fflush testFflush
+#define fsync testFsync
+#define rename testRename
+#define mkstemp testMkstemp
+#define mkstemps testMkstemps
+#define tjInitDecompress testInitDecompress
+// PRODUCTION_DEFINITIONS
+#undef fseek
+#undef ftell
+#undef fread
+#undef fclose
+#undef fwrite
+#undef fflush
+#undef fsync
+#undef rename
+#undef mkstemp
+#undef mkstemps
+#undef tjInitDecompress
+
+static int descriptors() {
+    DIR* dir = opendir("/proc/self/fd"); assert(dir); int count = 0;
+    while (readdir(dir)) ++count;
+    closedir(dir); return count;
+}
+
+// Real JPEG encoder/decoder, with a reference implementing the old 444 packing.
+static void jpegFile(const std::string& path, int width, int height, int sampling) {
+    std::vector<unsigned char> rgb(width * height * 3);
+    for (size_t i = 0; i < rgb.size(); ++i) rgb[i] = static_cast<unsigned char>(i * 37);
+    tjhandle handle = tjInitCompress(); assert(handle);
+    unsigned char* compressed = nullptr; unsigned long size = 0;
+    assert(tjCompress2(handle, rgb.data(), width, 0, height, TJPF_RGB, &compressed, &size, sampling, 90, TJFLAG_FASTDCT) == 0);
+    FILE* file = fopen(path.c_str(), "wb"); assert(file);
+    assert(fwrite(compressed, 1, size, file) == size); assert(fclose(file) == 0);
+    tjFree(compressed); tjDestroy(handle);
+}
+static void codecTest(const std::string& dir) {
+    for (int width : {4, 6, 16}) {
+        const std::string path = dir + "/codec.jpg";
+        jpegFile(path, width, 4, TJSAMP_444);
+        std::string compressed = readFile(path);
+        size_t pixels = width * 4;
+        std::vector<unsigned char> planes(pixels * 3), actual(pixels * 3 / 2 + 16, 0xA5), expected(pixels * 3 / 2);
+        tjhandle decoder = tjInitDecompress(); assert(decoder);
+        assert(tjDecompressToYUV2(decoder, reinterpret_cast<unsigned char*>(&compressed[0]), compressed.size(),
+            planes.data(), width, 1, 4, TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE) == 0);
+        tjDestroy(decoder);
+        std::copy(planes.begin(), planes.begin() + pixels, expected.begin());
+        for (int y = 0; y < 2; ++y) for (int x = 0; x < width; x += 2) {
+            expected[pixels + y * width + x] = planes[2 * pixels + 2 * y * width + x];
+            expected[pixels + y * width + x + 1] = planes[pixels + 2 * y * width + x + 1];
+        }
+        assert(oc::Image::JPG2YUV(path, actual.data(), width, 4));
+        assert(std::equal(expected.begin(), expected.end(), actual.begin()));
+        for (size_t i = expected.size(); i < actual.size(); ++i) assert(actual[i] == 0xA5);
+        auto reject = [&]() { std::fill(actual.begin(), actual.end(), 0xA5); assert(!oc::Image::JPG2YUV(path, actual.data(), width, 4)); for (auto c : actual) assert(c == 0xA5); };
+        for (int sampling : {TJSAMP_420, TJSAMP_422, TJSAMP_GRAY}) { jpegFile(path, width, 4, sampling); reject(); }
+        jpegFile(path, width + 2, 4, TJSAMP_444); reject();
+        writeFile(path, compressed.substr(0, compressed.size() - 20)); reject();
+        writeFile(path, "not jpeg"); reject(); writeFile(path, ""); reject(); remove(path.c_str()); reject();
+    }
+    unsigned char data[24];
+    assert(!oc::Image::JPG2YUV("unused", data, 3, 4));
+    assert(!oc::Image::JPG2YUV("unused", data, INT_MAX, 4));
+    assert(!oc::Image::JPG2YUV("unused", nullptr, 4, 4));
+    // Concurrent conversions exercise local FILE/decoder ownership with real codec data.
+    jpegFile(dir + "/parallel.jpg", 4, 4, TJSAMP_444);
+    int before = descriptors();
+    for (std::string point : {"seek", "tell", "read", "close", "decoder"}) {
+        ioFailure = point;
+        assert(!oc::Image::JPG2YUV(dir + "/parallel.jpg", data, 4, 4));
+        assert(descriptors() == before);
+    }
+    ioFailure.clear();
+    auto decode = [&]() { for (int i = 0; i < 20; ++i) { unsigned char out[24]; assert(oc::Image::JPG2YUV(dir + "/parallel.jpg", out, 4, 4)); } };
+    std::thread a(decode), b(decode); a.join(); b.join();
+}
+static void clean() { assert(contexts == 0 && configs == 0 && meshes == 0 && alphaImages == 0); }
+static void reset() { clean(); failure.clear(); badOutput.clear(); diagnostic.clear(); lastStreamAsset.clear(); exportBoundaryCheck={}; updates = saves = failUpdate = streamedExports = 0; throws = false; }
+static void unlockCheck(oc::App& app) {
+    assert(!app.offline_export.load());
+    assert(app.texturing_result_mutex.try_lock()); app.texturing_result_mutex.unlock();
+    assert(app.reconstruction.locks == app.reconstruction.unlocks);
+    assert(app.reconstruction.binder.try_lock()); app.reconstruction.binder.unlock();
+    assert(app.reconstruction.render_mutex_.try_lock()); app.reconstruction.render_mutex_.unlock();
+    assert(!app.reconstruction.texturize.Context()); clean();
+}
+static void suppliedDatasetTest(const std::string& directory) {
+    reset();
+    oc::Dataset dataset(directory);
+    int count = 0, width = 0, height = 0;
+    double cx = 0, cy = 0, fx = 0, fy = 0;
+    dataset.ReadState(count, width, height, cx, cy, fx, fy);
+    assert(count == 3 && width == 64 && height == 64 && cx == 32 && cy == 32 && fx == 80 && fy == 80);
+    const size_t pixels = width * height;
+    for (int frame = 0; frame < count; ++frame) {
+        const std::string path = dataset.GetFileName(frame, ".jpg");
+        std::string jpeg = readFile(path);
+        assert(!jpeg.empty());
+        std::vector<unsigned char> legacy(pixels * 3), actual(pixels * 3 / 2);
+        tjhandle decoder = tjInitDecompress(); assert(decoder);
+        assert(tjDecompressToYUV2(decoder, reinterpret_cast<unsigned char*>(&jpeg[0]), jpeg.size(),
+                legacy.data(), width, 4, height, TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE) == 0);
+        tjDestroy(decoder);
+        // The original in-place JPG2YUV loop, valid for this fixture's 444 / aligned width.
+        for (int y = 0; y < height / 2; ++y) {
+            size_t offset = pixels + y * width, source = pixels + y * 2 * width;
+            if (offset != source) memcpy(legacy.data() + offset, legacy.data() + source, width);
+            for (int x = 0; x < width; x += 2) legacy[offset + x] = legacy[pixels + source + x];
+        }
+        legacy.resize(pixels * 3 / 2);
+        assert(oc::Image::JPG2YUV(path, actual.data(), width, height));
+        assert(actual == legacy);
+        expectedFrames.push_back(legacy);
+    }
+    externalFixture = true;
+    {
+        oc::TangoTexturize wrapper;
+        // Mesh load/context/update remain explicitly injected C API boundaries.
+        assert(wrapper.Init("injected", true, false));
+        assert(wrapper.ApplyFrames(&dataset));
+        assert(updates == 3);
+    }
+    clean();
+    puts("PASS: supplied synthetic legacy dataset, 3 x 64x64 JPEG444 frames, exact old NV21 bytes and translated poses at update boundary");
+}
+int main(int argc, char** argv) {
+    assert(argc == 2 || argc == 3); std::string dir = argv[1]; codecTest(dir);
+    oc::Dataset dataset(dir);
+    auto fixture = [&]() {
+        assert(dataset.WriteState(2, 4, 4, 2, 2, 4, 4));
+        for (int i = 0; i < 2; ++i) {
+            assert(dataset.WritePose(i, std::vector<glm::mat4>(oc::MAX_CAMERA, glm::mat4(1))));
+            jpegFile(dataset.GetFileName(i, ".jpg"), 4, 4, TJSAMP_444);
+        }
+        writeFile(dir + "/rotation.txt", "-90");
+    };
+    fixture();
+    {
+        oc::TangoTexturize wrapper;
+        assert(wrapper.Init("injected", true, false));
+        assert(options["mesh_simplification_factor"] == (SCANNER_MODERN ? 1 : 10));
+        assert(wrapper.Init("injected", true, true));
+        assert(options["mesh_simplification_factor"] == (SCANNER_MODERN ? 1 : 5));
+        assert(options["max_num_textures"] == 1 && options["texture_size"] == 4096);
+        wrapper.SetTextureParams(7, 2048, 4);
+        assert(wrapper.Init("injected", true, false));
+        assert(options["mesh_simplification_factor"] == (SCANNER_MODERN ? 1 : 7));
+        for (auto parameters : {std::pair<int,int>{16,8}, {4096,1}, {2048,4}, {4096,0}, {16,0}}) {
+            wrapper.SetTextureParams(99, parameters.first, parameters.second);
+            assert(wrapper.Init("injected", true, false));
+            assert(options["texture_size"] == parameters.first && options["max_num_textures"] == parameters.second);
+        }
+        for (auto parameters : {std::pair<int,int>{15,1}, {4097,1}, {2048,5}, {4096,2}, {16,9}, {16,-1}, {INT_MAX,INT_MAX}}) {
+            wrapper.SetTextureParams(99, parameters.first, parameters.second);
+            int before = configCreates;
+            assert(wrapper.Init("injected", true, false) == !SCANNER_MODERN);
+#if SCANNER_MODERN
+            clean(); assert(configCreates == before);
+            assert(diagnostic.find("Unsupported texturing resource budget") != std::string::npos);
+            assert(diagnostic.find("64 MiB") != std::string::npos);
+#endif
+        }
+        wrapper.SetTextureParams(10, 2048, 4);
+        assert(wrapper.Init("injected", true, false));
+    }
+    reset();
+    {
+        oc::TangoTexturize wrapper; assert(!wrapper.Context()); assert(wrapper.Camera().width == 0);
+        assert(wrapper.Init("injected", true, false));
+        assert(wrapper.Init("injected", true, false)); assert(contexts == 1);
+        assert(wrapper.ApplyFrames(&dataset)); assert(updates == 2);
+        assert(wrapper.Process(dir + "/wrapper.obj")); clean();
+        for (std::string point : {"config", "texturing_backend", "max_num_textures", "mesh_simplification_factor", "texture_size", "min_resolution", "context", "config_destroy", "load", "empty", "mesh_destroy"}) {
+            reset(); failure = point; assert(!wrapper.Init("injected", true, false)); clean();
+        }
+        for (std::string point : {"calibration", "update", "get", "save", "mesh_destroy", "context_destroy"}) {
+            reset(); assert(wrapper.Init("injected", true, false));
+            if (point != "calibration" && point != "update") assert(wrapper.ApplyFrames(&dataset));
+            failure = point;
+            if (point == "calibration" || point == "update") assert(!wrapper.ApplyFrames(&dataset));
+            else assert(!wrapper.Process(dir + "/wrapper.obj"));
+            clean();
+        }
+        reset(); assert(wrapper.Init("injected", true, false)); failUpdate = 2;
+        assert(!wrapper.ApplyFrames(&dataset)); assert(updates == 2); clean();
+        reset(); assert(wrapper.Init("injected", true, false)); throws = true;
+        assert(!wrapper.ApplyFrames(&dataset)); clean();
+        for (std::vector<int> frames : {std::vector<int>{}, {-1}, {2}}) {
+            reset(); assert(wrapper.Init("injected", true, false)); assert(!wrapper.ApplyFrames(&dataset, frames)); clean();
+        }
+        for (int fault = 0; fault < 7; ++fault) {
+            reset(); fixture(); assert(wrapper.Init("injected", true, false));
+            if (fault == 0) remove((dir + "/state.txt").c_str());
+            if (fault == 1) writeFile(dir + "/state.txt", "2 bad");
+            if (fault == 2) writeFile(dir + "/state.txt", "2 2147483647 4 2 2 4 4");
+            if (fault == 3) remove(dataset.GetFileName(0, ".mat").c_str());
+            if (fault == 4) writeFile(dataset.GetFileName(0, ".mat"), "bad pose");
+            if (fault == 5) assert(dataset.WritePose(0, std::vector<glm::mat4>(oc::MAX_CAMERA, glm::mat4(0))));
+            if (fault == 6) remove(dataset.GetFileName(0, ".jpg").c_str());
+            assert(!wrapper.ApplyFrames(&dataset)); clean();
+        }
+        reset(); fixture(); assert(wrapper.Init("injected", true, false));
+    }
+    clean(); // destructor cleans an unprocessed context
+    fixture();
+    const std::string input = dir + "/source.obj", output = dir + "/output.obj";
+    writeFile(input, "SOURCE MUST SURVIVE");
+    oc::App app; app.reconstruction.dataset = &dataset;
+    for (std::string point : {"load", "config", "update", "get", "save", "missing_output", "empty_subset", "alpha_write", "alpha_read"}) {
+        reset(); failure = point;
+        assert(!app.Texturize(input, output, point == "alpha_write" || point == "alpha_read", point == "empty_subset"));
+        assert(!app.texturing_error.empty());
+        unlockCheck(app); assert(readFile(input) == "SOURCE MUST SURVIVE");
+    }
+    reset(); throws = true; assert(!app.Texturize(input, output, false, false)); unlockCheck(app);
+    for (const std::string& malformed : {"\n", "v 1 2\nf 1 1 1\n", "v nan 2 3\nf 1 1 1\n", "v 1 2 3oops\nf 1 1 1\n", "v 1 2 3\nf a b c\n", "v 1 2 3\nf 1 1\n", "v 1 2 3\nf 1 1 2\n", "v 1 2 3\nf 1/x 1 1\n", "v 1 2 3\nf 1///1 1 1\n", "v 1 2 3\nvt broken\nf 1 1 1\n"}) {
+        reset(); writeFile(output,"PRIOR OUTPUT"); badOutput = malformed;
+        assert(!app.Texturize(input, output, false, false));
+        assert(readFile(output) == (SCANNER_MODERN ? "PRIOR OUTPUT" : malformed)); unlockCheck(app);
+        if (!lastStreamAsset.empty()) assert(access(lastStreamAsset.c_str(),F_OK) != 0);
+    }
+    for (bool poisson : {false, true}) for (bool twoPass : {false, true}) {
+        reset(); fixture();
+        app.reconstruction.paused = false;
+        exportBoundaryCheck = [&] {
+            assert(app.offline_export.load() && app.reconstruction.paused);
+            assert(app.reconstruction.render_mutex_.try_lock());
+            app.reconstruction.render_mutex_.unlock();
+        };
+        assert(app.Texturize(input, output, poisson, twoPass)); unlockCheck(app);
+        assert(app.texturing_error.empty());
+        assert(streamedExports == (SCANNER_MODERN && !poisson && !twoPass ? 1 : 0));
+        if (!lastStreamAsset.empty()) {
+            assert(readFile(lastStreamAsset) == "injected texture resource");
+            remove(lastStreamAsset.c_str());
+        }
+        assert(readFile(input) == "SOURCE MUST SURVIVE");
+        if (poisson) assert(poissonPath == output);
+        std::string result = readFile(output);
+        assert(result.find("vt 0.123456789012345 0.987654321098765") != std::string::npos);
+        assert(result.find("vn ") != std::string::npos && result.find("# keep") != std::string::npos);
+        std::istringstream lines(result); std::string line;
+        while (std::getline(lines, line)) {
+            std::istringstream fields(line); std::string kind; fields >> kind;
+            if (kind == "v") { double x, y, z, w; fields >> x >> y >> z >> w;
+                assert(std::fabs(x - 1.123456789012345) < 1e-14 && std::fabs(z - 3.3456789012345) < 1e-14 && w == 1); break; }
+        }
+    }
+    reset(); writeFile(dir + "/rotation.txt", "0"); assert(app.Texturize(input, output, false, false));
+    std::istringstream compass(readFile(output)); std::string compassLine;
+    while (std::getline(compass, compassLine)) {
+        std::istringstream fields(compassLine); std::string kind; fields >> kind;
+        if (kind == "v") { double x, y, z; fields >> x >> y >> z;
+            assert(std::fabs(x + 3.3456789012345) < 1e-14 && std::fabs(z - 1.123456789012345) < 1e-14); break; }
+    }
+    unlockCheck(app);
+    if (!lastStreamAsset.empty()) remove(lastStreamAsset.c_str());
+    int before = descriptors();
+    for (std::string point : {"write", "flush", "sync", "rename", "temporary"}) {
+        reset(); writeFile(output,"PRIOR OUTPUT"); ioFailure = point;
+        assert(!app.Texturize(input, output, false, false));
+        assert(readFile(output) == (SCANNER_MODERN ? "PRIOR OUTPUT" : validObj)); unlockCheck(app);
+        if (!lastStreamAsset.empty()) assert(access(lastStreamAsset.c_str(),F_OK) != 0);
+        assert(descriptors() == before);
+    }
+    ioFailure.clear();
+    reset(); assert(!app.Texturize(input, input, false, false)); unlockCheck(app);
+    assert(readFile(input) == "SOURCE MUST SURVIVE");
+    DIR* files = opendir(dir.c_str()); assert(files);
+    while (dirent* file = readdir(files)) {
+        assert(std::string(file->d_name).find(".reorient-") == std::string::npos);
+        assert(std::string(file->d_name).find(".texturing-") == std::string::npos);
+    }
+    closedir(files);
+    puts("PASS: real codec pixels, validation, cleanup, bool statuses, RAII locks, atomic OBJ reorientation");
+    if (argc == 3) suppliedDatasetTest(argv[2]);
+}
