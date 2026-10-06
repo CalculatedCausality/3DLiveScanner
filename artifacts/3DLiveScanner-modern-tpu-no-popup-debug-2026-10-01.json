@@ -1,0 +1,10 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-tpu-no-popup-debug-2026-10-01.apk",
+  "sha256": "0e0d3bce39cff9494bb94aba19136cae2ba86525cc7c584149b1f3f0a4e35693",
+  "installed": false,
+  "native_unchanged_from_preview": true,
+  "privacy_popup_removed": true,
+  "privacy_link": "Settings",
+  "preview_radius_metres": 8,
+  "reason_waiting": "User explicitly reported an active scan; do not interrupt it"
+}

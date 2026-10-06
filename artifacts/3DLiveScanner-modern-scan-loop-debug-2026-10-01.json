@@ -1,0 +1,41 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-scan-loop-debug-2026-10-01.apk",
+  "sha256": "774723b75df88daf335a26691f600289a835f418bbf8c0cfe8234584c5333653",
+  "installed": true,
+  "checks_passed": true,
+  "source_hashes": {
+    "common/thread/reconstr.cc": "ba2ae8ecc264bc0745ed7047e3d41a13788eb699beab3f76580707ee220c8dab",
+    "common/thread/reconstr.h": "24d15b0593eb31ab421345d5e03f3329fe4c865b0acf2985527041a8de9d71d7",
+    "scanner/app/src/main/jni/app.cc": "9cdbd06bee46c99c0ead8feb04c695805999e281939f842bcc94d4ed525ba950",
+    "common/depth/experimental.cc": "e6f268981436a080c487e357c02ce03a55e629ea3869377914e5969923d11d59",
+    "common/tango/scan.cc": "3b3efaf87cb2ccd64e8dda67e93e0fb2508100e127bb2431d7a9ae99b44919aa"
+  },
+  "change": "Separate committed preview publication from camera/display lock; add measured capture cadence",
+  "capture_quality_settings_changed": false,
+  "recording_format_changed": false,
+  "prior_observed_capture_hz": 7.3,
+  "prior_merge_wait_ms": [
+    14.64,
+    26.68
+  ],
+  "device_speedup_measured": false,
+  "live_observation": {
+    "controlled_comparison": false,
+    "pid": 16739,
+    "committed_frame_windows": 8,
+    "frames_per_window": 30,
+    "merge_wait_ms_range": [0.0, 0.01],
+    "capture_hz_range_including_long_gap": [0.72, 13.99],
+    "capture_hz_range_excluding_long_gap": [6.8, 13.99],
+    "long_gap_cause_determined": false,
+    "requested_resolution_metres": 0.02,
+    "preview_resolution_metres": 0.05,
+    "native_tpu_active": true,
+    "scoped_crash_buffer_empty": true,
+    "report": "/tmp/opencode/scanner-build-verification/scan-loop-live-20261001.json"
+  },
+  "tpu_enabled": true,
+  "coverage_preview_enabled": true,
+  "capture_first_enabled": true,
+  "capture_state_preserved": true
+}

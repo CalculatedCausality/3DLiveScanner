@@ -1,0 +1,26 @@
+{
+  "apk": "artifacts/3DLiveScanner-modernized-debug-2026-09-29.apk",
+  "sha256": "0b1e81ecfcaabcf04494de38ff98754b1ca0e4abf7d99cdfdebb9476b1f51d0e",
+  "installed": true,
+  "original_vendor_reconstruction_present": true,
+  "application_id": "com.lvonasek.arcore3dscanner",
+  "version_code": 220022,
+  "device_kernel_page_bytes": 4096,
+  "backup_directory": "/tmp/opencode/scanner-original-engine-rollback-20261001",
+  "private_backup_bytes": 1246390784,
+  "private_capture_state_preserved": true,
+  "saved_library_entries_preserved": 11,
+  "user_capture_feedback": "Quality is back",
+  "real_capture_quality_verified_by_user": true,
+  "post_test_pid": 9857,
+  "post_test_crash_buffer_empty": true,
+  "restored_settings": {
+    "resolution_metres": 0.02,
+    "camera_measurement_limit_metres": 4,
+    "space_clearing": true,
+    "geometry_offset": true,
+    "capture_first": true
+  },
+  "working_tree_matches_installed_historical_apk": false,
+  "instruction": "Retain this original-engine quality baseline; experimental source changes are not approved for automatic redeployment."
+}

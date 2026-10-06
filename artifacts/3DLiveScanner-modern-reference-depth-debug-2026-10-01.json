@@ -1,0 +1,43 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-reference-depth-debug-2026-10-01.apk",
+  "sha256": "f4d6eeedbbfccd5fc4f9edb62edb134c63aab00e585000632240d466f5fbceee",
+  "installed": true,
+  "checks_passed": true,
+  "source_hashes": {
+    "common/arcore/arcore.cc": "c19acd8ffb05c23a456c4c7ea8134eb2d36e3f36c7f46f98b066c0ef8b3436ab",
+    "common/arcore/arcore.h": "94f700611759020109d35330a3ccea81996977a9e9400b6f10f0f05eb7c4aef1",
+    "common/arcore/backend.h": "2ab43b0802ae5c5f386395cee8256ee97bcad47517bf74ded7ce08bb633858f2",
+    "common/arcore/service.cc": "bcc1a788bd0a37c45bbc4b09a0cd1a5de1430f193cf18b0714e38a9671b5eefc",
+    "common/arcore/service.h": "14bae1c7d735d740fdd6c239ede7711978894b2a33ec53aecc4f7942cd5a3a44",
+    "common/arcore/camera.cc": "5fbf2817dbe2e311d368e4d1bea20ba7f1328df2811b3ddbd8d3ca72b9f5c6e9",
+    "common/arcore/camera.h": "af0d637c451ee3449ef35801dee57f7469d76f97d635a33f85f3b24bda19abad",
+    "common/arcore/depth_measurement.h": "b19acc53879c9e98edcabfd8d26cb6ee11670667bbefe7491d5101edeb73e507",
+    "common/depth/frame_capture.h": "199253fbb0eda0ed6e904701f88aabec7264056016c3f3899e5316091f90eacb",
+    "scanner/app/src/main/jni/app.cc": "7b3e63177d79acb0ba087e019506981ada9d89c85e663879ca7bcb73adb46a76",
+    "scanner/app/src/main/jni/app.h": "681b4e5c9fde2d25e6c0ef83ec91c3ed5f68c527a3a2728ae4ecfe6339889e50",
+    "scanner/app/src/main/java/com/lvonasek/arcore3dscanner/main/JNI.java": "265e57f783539f93d1f10de9a5c2f8d0cbec0e4df413af6f68bf25190810d298",
+    "scanner/app/src/modernDebug/java/com/lvonasek/arcore3dscanner/debug/TpuTestReceiver.java": "487c02922a7e90455656f0e61ed1296299feeaf629dd6e9253cc51b25c3edcc0",
+    "reconstruction/core.cc": "eea8cc7fa48e3a92415233775bd2f0c80ac01f4853230cb82b0f1f4ee9476b32",
+    "reconstruction/field_normals.h": "6ede4d244ff46a2a497cdacf8639f2424d1552e97bccd2fc4c7645afce2d310a",
+    "common/depth/experimental.cc": "9342cd440f86af707e2c5bd819cac09d2265cb8339c74776df8ca83a6c80633a"
+  },
+  "tpu_enabled": false,
+  "coverage_preview_enabled": false,
+  "space_clearing_enabled": false,
+  "geometry_offset_enabled": false,
+  "capture_first_enabled": true,
+  "change": "Session-anchor reference with nearby continuous handoffs; reliable raw depth preserved and bounded dense estimates at lower fusion weight",
+  "estimated_depth_fusion_weight": 0.1,
+  "estimated_depth_range_metres": [
+    0.15,
+    8
+  ],
+  "reference_rebase_distance_metres": 4,
+  "reference_failure_max_distance_metres": 8,
+  "calibration_diagnostics_available": true,
+  "live_motion_stability_verified": false,
+  "live_calibration_difference_at_2m": 0.000463,
+  "user_feedback": "New areas scan really well; backtracking mangles previously captured areas. Revisit repair required.",
+  "prior_regression_fixture_sha256": "9bada743de8cb929db303e70115ed1901c55178929a58c861ceedbc6f10b7ee7",
+  "capture_state_preserved": true
+}

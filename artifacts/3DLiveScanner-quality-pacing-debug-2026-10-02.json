@@ -1,0 +1,33 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-quality-pacing-debug-2026-10-02.apk",
+  "sha256": "66fc40e2f3f213a27ed1f90c97a520afd11111855096a50f6bed86818a6c9f90",
+  "application_id": "com.lvonasek.arcore3dscanner.quality",
+  "immutable_native_libraries": {
+    "lib/arm64-v8a/lib3dscanner.so": "f1894798ef53e4e9583040988981a4364c8fab5872c6ea9b91f7b1cd642dcfd2",
+    "lib/arm64-v8a/libarcore_sdk_c.so": "ecb19f20684affa27e0e5e347bed35a4e0303702f59e57202a61826676662844",
+    "lib/arm64-v8a/libarcore_sdk_jni.so": "1aad6e42981e94e64c6fa24fcb3adc37539d8afac05e808cc47ebe7f46fa1be2",
+    "lib/arm64-v8a/libc++_shared.so": "dfdbbc6d633d7d7734271ee3b7a288976393ec0ec38f1fedc99360f266ad5279",
+    "lib/arm64-v8a/libgvr.so": "d904488ddc558aa25ac286c281043c95ef54bbdfb5d668b01d4b0b18c2c34d5f",
+    "lib/arm64-v8a/libgvr_audio.so": "ef99870283cfe242ae684654069d630317b3a1d72d5e2a6566a8cd9c96f81e63",
+    "lib/arm64-v8a/libhuawei_arengine_jni.so": "d3bdc244d5c239f40ae06931cfe7cd8740a81417a83459c1542938d17ad6fd47",
+    "lib/arm64-v8a/libhuawei_arengine_ndk.so": "fe36c88ea3fc5278bb0bc5a077e285e981c430ffdab3a128ccb0ada6af1dd118",
+    "lib/arm64-v8a/libtango_3d_reconstruction.so": "873d5a3b37496366fa960ab22219e7903eaf84ea2564f618a679ba078a69050c"
+  },
+  "scope": "Original capture, rendering, reconstruction and codec binaries unchanged; no 16 KiB runtime claim",
+  "installed": false,
+  "change": "Debug-only bounded Java/JNI-call/EGL-swap frame timings; no scheduling or geometry fix claimed",
+  "all_ten_native_libraries_identical_to_previous_candidate": true,
+  "timing_tests_passed": true,
+  "jni_compatibility_tests_passed": true,
+  "signature_and_zip_alignment_verified": true,
+  "real_capture_quality_verified": false,
+  "whole_app_speedup_measured": false,
+  "baseline_apk_unchanged_readonly_verified": true,
+  "installation_attempt": {
+    "status": "blocked_before_device_access",
+    "reason": "Previously configured /tmp/opencode/pixelshare-sdk/platform-tools/adb is unavailable in the current environment",
+    "device_mutation_performed": false,
+    "alternate_adb_found": true,
+    "alternate_connection_result": "Windows platform-tools adb.exe found; 192.168.1.114:44215 refused the connection"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-fusion-cache-debug-2026-10-01.apk",
+  "sha256": "133ea10f8ecec16f204cd500255d36980701eb37b3c26a7d66241b021953e7f5",
+  "installed": true,
+  "checks_passed": true,
+  "source_hashes": {
+    "reconstruction/core.cc": "d6db98d7ef4040ec620b4cd5fc35d89754b3ba3fcf9105d2638f3614ca2d04cd",
+    "common/thread/reconstr.cc": "ba2ae8ecc264bc0745ed7047e3d41a13788eb699beab3f76580707ee220c8dab",
+    "common/thread/reconstr.h": "24d15b0593eb31ab421345d5e03f3329fe4c865b0acf2985527041a8de9d71d7",
+    "scanner/app/src/main/jni/app.cc": "9cdbd06bee46c99c0ead8feb04c695805999e281939f842bcc94d4ed525ba950",
+    "common/depth/experimental.cc": "e6f268981436a080c487e357c02ce03a55e629ea3869377914e5969923d11d59",
+    "reconstruction/dataset_texturing.h": "f17649c6b9c0d0dc49be1e9a07e8c0291fb6db8c50f563463cf98435f4fc98c3",
+    "reconstruction/field_normals.h": "546e5b7edf8cb166bdc222fe603aa9a3f74fa6fcefbc6ac32cb1c7d67ccbadd7",
+    "reconstruction/meshing.h": "9e56fa0023701ae689cc0278a0be4fedb052717257fd91c4f2f6441eca558344",
+    "reconstruction/paging.h": "d5a738a400484caa1b5c567fd2c3f88513d803ea553fbc670b63464fa7d91a1c",
+    "reconstruction/paging_store.h": "bc6ab23e0c33bdb262b8ddec86c7ae8599324e7f7f173373f29a9bda054d61de",
+    "reconstruction/ray_fusion.h": "a14e3d7a6332e78d690ae739bac08d0dfd222279009f9352b866142321ce6b53",
+    "reconstruction/texture_geometry.h": "5be0a80526fc48cf4eae6da4054630e04d44e6b6f6964ee042cae06e32694cda",
+    "reconstruction/texture_obj.h": "5de4c0f59aa2215583e650cc837972f051c7653402362ecc8d8e1406c4223949"
+  },
+  "change": "Reuse the existing paged voxel pin for consecutive accesses to the same record",
+  "additional_cache_memory_bytes": 0,
+  "recording_format_changed": false,
+  "pixel_native_benchmark": {
+    "before": {
+      "update_ms": 2702.894856499999,
+      "extract_ms": 432.71032849999995,
+      "combined_ms": 3135.6051849999994,
+      "per_run_update_ms": [
+        2717.630085,
+        2688.159627999999
+      ],
+      "compared_bytes": 38861461
+    },
+    "after": {
+      "update_ms": 2251.9829945,
+      "extract_ms": 431.24512400000003,
+      "combined_ms": 2683.2281185,
+      "per_run_update_ms": [
+        2218.5355240000004,
+        2285.430465
+      ],
+      "compared_bytes": 38861461
+    },
+    "reduction_percent": {
+      "update_ms": 16.682552816127238,
+      "extract_ms": 0.33861093750156,
+      "combined_ms": 14.427105448864076
+    },
+    "ordered_mesh_hashes": {
+      "before": [
+        "2129d591fecc058752b62c3f967da35ce81e4c1861d1e6d6b4d59a8484ca1c82",
+        "2129d591fecc058752b62c3f967da35ce81e4c1861d1e6d6b4d59a8484ca1c82"
+      ],
+      "after": [
+        "2129d591fecc058752b62c3f967da35ce81e4c1861d1e6d6b4d59a8484ca1c82",
+        "2129d591fecc058752b62c3f967da35ce81e4c1861d1e6d6b4d59a8484ca1c82"
+      ]
+    },
+    "scope": "Pixel native generated 24-frame paged workload, ABBA; not whole-app capture FPS"
+  },
+  "recorded_fixture_frames": 451,
+  "recorded_fixture_points": 4707444,
+  "recorded_mesh_identical_sha256": "3e260fb2ab9082d648c38110a0267807c1b1a397c379e84c36ceaca4747ee3ae",
+  "whole_app_capture_speedup_measured": false,
+  "tpu_enabled": true,
+  "coverage_preview_enabled": true,
+  "capture_first_enabled": true,
+  "capture_state_preserved": true
+}

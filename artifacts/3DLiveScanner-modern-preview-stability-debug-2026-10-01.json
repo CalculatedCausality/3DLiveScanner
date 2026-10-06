@@ -1,0 +1,25 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-preview-stability-debug-2026-10-01.apk",
+  "sha256": "b82c43b162a0bd364084b619301bf177740aaa3c3cda5920a6101d23cf451fae",
+  "installed": true,
+  "checks_passed": true,
+  "source_hashes": {
+    "reconstruction/core.cc": "d6db98d7ef4040ec620b4cd5fc35d89754b3ba3fcf9105d2638f3614ca2d04cd",
+    "scanner/app/src/main/java/com/lvonasek/arcore3dscanner/main/Main.java": "6cf045146d273e88b583deabcae7df09000755bdddf275c2f897ccd71bd028fb",
+    "scanner/app/src/modernDebug/java/com/lvonasek/arcore3dscanner/debug/TpuTestReceiver.java": "0bd8e5b8ef7fb70ff906254e056ea194676335526522b2cb072a8966c8a45fc8",
+    "scanner/app/src/main/res/xml/settings.xml": "e69168aca387639c38aed36203e721776d2d1c0ecd8d6f902b766a9876f5d901",
+    "scanner/app/src/main/res/values/tpu_strings.xml": "2a3b30fb33eab4aa95657057e37461c3b207c85a5cd7937e2ba949cbeffc7fc0"
+  },
+  "tpu_enabled": false,
+  "coverage_preview_enabled": false,
+  "space_clearing_enabled": false,
+  "capture_first_enabled": true,
+  "native_libraries_identical_to_fusion_cache": true,
+  "change": "Full-detail preview by default; explicitly disable experimental TPU correction and free-space clearing for the stability trial",
+  "capture_preservation_check_pending": false,
+  "visual_hole_repair_confirmed": false,
+  "user_visual_feedback": "Still badly fragmented on a fresh scan; superseded by partial-cell meshing repair",
+  "diagnostic_fixture_sha256": "f10db463a0a58579b88aa40af3f3730da61697b7658ccd1dc5e3f9da17282803",
+  "diagnostic_note": "484-frame geometry-only replay; no-clearing retained 22% more surface area, but this is not proof of physical accuracy or a complete hole repair",
+  "capture_state_preserved": true
+}

@@ -1,0 +1,24 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-capture-first-debug-2026-10-01.apk",
+  "sha256": "b4e938a73fb9fdf05ba1cb93dee2e7e398120429bc7bd0a9b43cae95bbd5941e",
+  "installed": true,
+  "checks_passed": true,
+  "source_hashes": {
+    "common/depth/experimental.cc": "e6f268981436a080c487e357c02ce03a55e629ea3869377914e5969923d11d59",
+    "common/thread/capture_policy.h": "ef891f633ffaf9c395ac6a614bdb7c1fbf9d7b6b063fedb486f13bf08f6d8cd0",
+    "common/thread/reconstr.cc": "187b40d6fff710654c277aa6da08e21d371a0b54e60f53369f6d051a968f03f4",
+    "common/thread/reconstr.h": "4c1678c73ee94bb6fc8b60a87e8a016e3155def822ea6412197ef949329b9adb",
+    "common/tango/scan.h": "d30ab062dea153ca79592258d69d5b72194ef96ad8ae47e7803becf87c256441",
+    "scanner/app/src/main/jni/app.cc": "a17b59a5575320f3ecebb40622ed018554b044136acb2670b82b399c8d0df9a7",
+    "scanner/app/src/main/java/com/lvonasek/arcore3dscanner/main/Main.java": "38f0f54ae94914105323d821dd9183120052ac5d43eeb8b0b5d2e6d90f64de90",
+    "scanner/app/src/main/java/com/lvonasek/arcore3dscanner/ui/FileManager.java": "db82a9f196f0f1f95047e35a26201d21d92b58499b3227683020c562e2302fca"
+  },
+  "coverage_preview_metres": 0.05,
+  "recorded_measurements_reduced": false,
+  "privacy_popup_removed": true,
+  "preview_radius_metres": 8,
+  "tpu_enabled": true,
+  "coverage_preview_enabled": true,
+  "capture_first_enabled": true,
+  "capture_state_preserved": true
+}

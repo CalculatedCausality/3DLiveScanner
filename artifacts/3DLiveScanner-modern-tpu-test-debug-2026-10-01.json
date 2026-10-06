@@ -1,0 +1,16 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-tpu-test-debug-2026-10-01.apk",
+  "sha256": "393530bb7bb74229af3257c9a0d285ad720232fc278073e55fc9a111022811cc",
+  "installed": true,
+  "enabled": true,
+  "preserved_capture_and_dataset": true,
+  "model_sha256": "76ef7a8c8376a1a921e2f055419d27b4eaeca425ac2b430dd3f14a89eae84be0",
+  "source_hashes": {
+    "common/depth/experimental.h": "da5594f5d816e74fb36f90ee23ef8773c42d30e94bac0e99b7c79ccb86d333a6",
+    "common/depth/experimental.cc": "4e58db3076d37fe5d95d26bc50bac2899ce957d05195a498fbcef75b62a53313",
+    "common/depth/model_data.h": "aa3b4bd3c8d3bd5c7aacb9b33f42e6ee5328e95ffe1d5c673617990b8a998709",
+    "common/depth/frame_capture.h": "658fc833277645a1031ce34526001702180a4cf4f885a1d20b6f09e56a9d6edc",
+    "common/depth/record.h": "028810d3daaaccffc93046491db3b3d7e409b888958c0202a8be48ab65ab94e0"
+  },
+  "selftest_requested": true
+}

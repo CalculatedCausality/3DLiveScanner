@@ -1,0 +1,25 @@
+{
+  "apk": "/mnt/c/Users/mauco/Documents/GitHub/3DLiveScanner/artifacts/3DLiveScanner-modern-export-fix-debug-2026-10-01.apk",
+  "sha256": "32d9a4561ce864aa7dc0cee49702c9104e193afe1327d5e3391d59511a0f8040",
+  "sources": {
+    "reconstruction/core.cc": "548b87ef7a4cdeab4587f38ce96cbe2895c48eefbcf3cd77510a4089b1a88842",
+    "reconstruction/meshing.h": "9e56fa0023701ae689cc0278a0be4fedb052717257fd91c4f2f6441eca558344",
+    "reconstruction/field_normals.h": "546e5b7edf8cb166bdc222fe603aa9a3f74fa6fcefbc6ac32cb1c7d67ccbadd7",
+    "reconstruction/ray_fusion.h": "a14e3d7a6332e78d690ae739bac08d0dfd222279009f9352b866142321ce6b53",
+    "reconstruction/paging.h": "d5a738a400484caa1b5c567fd2c3f88513d803ea553fbc670b63464fa7d91a1c",
+    "reconstruction/paging_store.h": "bc6ab23e0c33bdb262b8ddec86c7ae8599324e7f7f173373f29a9bda054d61de",
+    "reconstruction/dataset_texturing.h": "f17649c6b9c0d0dc49be1e9a07e8c0291fb6db8c50f563463cf98435f4fc98c3",
+    "reconstruction/dataset_texturing.cc": "05b2aa92db63fd669d5b0a951b8cb27971de3f693947d3c0a312ec373ad29687",
+    "reconstruction/Android.mk": "01458386881245758b6298f308f063695e48f45804fde53def493b701015549a",
+    "common/tango/texturize.cc": "d724aed68302e90a6374bd968fb9105cc093358278e69afa15a10c2e0f6f10bb",
+    "scanner/app/src/main/jni/app.cc": "83f5b2bc52d612270f7a2b29204cbc2ae422c6bf68571a1710932220a9089f3d",
+    "scanner/app/src/main/jni/app.h": "218ac692c987b11bfe2a02bef67f8f8c12b2b5c022503d03bf62e561de178950",
+    "scanner/app/src/main/java/com/lvonasek/arcore3dscanner/main/Main.java": "4fbaa38d2c365c606f36e004af5ac416d19267adfe31ee7df7149d3eb9c6b32c",
+    "scanner/app/src/main/java/com/lvonasek/arcore3dscanner/main/JNI.java": "c5f85d505fa80435754427089db527871fc2742e4319e4d44608d61bc077ac11",
+    "scanner/app/src/main/res/values/texturing_strings.xml": "77d1876c76194e274468e34112faedddae8a1e5ae33e11bcfd8e3e0ecef0d1f9"
+  },
+  "build_and_static_audit_passed": true,
+  "installed": true,
+  "preserved_capture_and_dataset": true,
+  "device_export_report": "/tmp/opencode/real-dataset-export-final-20261001/results.json"
+}
