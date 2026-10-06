@@ -1,0 +1,50 @@
+import java.io.*;
+import java.util.*;
+import java.text.SimpleDateFormat;
+
+// Exact production save() body, with labelled native/storage/UI boundaries.
+public class Main {
+  static class System {static int exits;static void exit(int code){assert code==0;exits++;}}
+  static class Log {static void d(String t,String m){}static void e(String t,String m,Exception e){}}
+  static class Location {double getLatitude(){return 0;}double getLongitude(){return 0;}}
+  static class GPS {void stop(){}Location getLastLocation(){return new Location();}}
+  static class GL {void stop(){stops++;}}
+  static class R {static class string {static final int saving=1;}}
+  static class Exporter {static final String EXT_OBJ=".obj",EXT_DATASET=".dataset";}
+  static class JNI {
+    static boolean ready=true,running=true;static int meshSaves,barriers;
+    static void onToggleButtonClicked(boolean value){running=value;}
+    static boolean save(byte[] name){meshSaves++;throw new AssertionError("Raw saving must not serialize an OBJ");}
+    static boolean finishCapture(){assert !running&&stops==1;barriers++;return ready;}
+  }
+  static class Service {
+    static final int SERVICE_SAVE=1,SERVICE_POSTPROCESS=2;static int resets;
+    static void process(String label,int type,Main m,Runnable task){task.run();}
+    static void reset(Main m){resets++;}static void forceState(Main m,String p,int s){}static void finish(String p){}
+  }
+  static class IO {
+    static boolean published,deleted,fail;
+    static void publishDirectoryChecked(File source,File dest)throws IOException{if(fail)throw new IOException("injected");published=true;}
+    static void deleteRecursive(File path){deleted=true;}
+  }
+  static int stops;static String parent;static final String TAG="test";
+  GPS mGPS;int mViewCamera;GL mGLView=new GL();
+  File getTempPath(){return new File(parent,"capture");}
+  String getPath(boolean unused){return parent;}
+  boolean isFaceModeOn(Main m){return false;}
+  boolean isPostProcessLaterOn(Main m){return true;}
+  String getString(int resource){return "saving";}
+  void finish(){}
+  // SAVE_BODY
+  public static void main(String[] args){
+    parent=args[0];
+    for(int failure=0;failure<3;failure++){
+      stops=System.exits=JNI.meshSaves=JNI.barriers=Service.resets=0;
+      IO.published=IO.deleted=false;IO.fail=failure==2;JNI.ready=failure!=1;JNI.running=true;
+      new Main().save();
+      assert JNI.barriers==1&&JNI.meshSaves==0&&stops==1&&System.exits==1&&Service.resets==1;
+      assert IO.published==(failure==0)&&IO.deleted==(failure==0);
+    }
+    java.lang.System.out.println("PASS raw capture save avoids OBJ generation and retains source on barrier/publication failure");
+  }
+}

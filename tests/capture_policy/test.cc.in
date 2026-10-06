@@ -1,0 +1,63 @@
+#include <thread/capture_policy.h>
+#include <atomic>
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <future>
+#include <mutex>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+namespace oc {
+struct Dataset {
+    std::string path;int count=2;
+    void ReadState(int& n,int& w,int& h,double& cx,double& cy,double& fx,double& fy){n=count;w=360;h=640;cx=180;cy=320;fx=fy=400;}
+    std::string GetFileName(int i,const std::string& ext){return path+"/"+std::to_string(i)+ext;}
+};
+struct Scan {
+    double resolution=.05;bool fail=false,recovery=false;
+    double Resolution(){return resolution;}
+    bool SelectResolution(double r){resolution=r;return !fail;}
+    void RequireRecovery(){recovery=true;}
+};
+struct Reconstruction {
+    std::mutex binder,render_mutex_;Dataset* dataset=nullptr;
+    std::atomic<bool> t3dr_is_running_{false},history_failed{false},write_failed{false},coverage_preview{true};
+    int committed_frames=2,frame_index=1;double capture_resolution=.01;Scan scan;
+    bool replayOkay=true;int replayCalls=0;
+    void BinderLock(){binder.lock();}void BinderUnlock(){binder.unlock();}
+    bool Undo(bool user,bool textures){assert(!user&&!textures);++replayCalls;return replayOkay;}
+    bool FinishCapture();bool PrepareFullResolution();
+};
+// FINISH_CAPTURE
+// PREPARE_FULL
+}
+int main(int argc,char**argv){
+    assert(argc==2);using namespace oc;
+    assert(CapturePreviewResolution(.01,true,false,false)==.05);
+    assert(CapturePreviewResolution(.02,true,false,false)==.05);
+    assert(CapturePreviewResolution(.08,true,false,false)==.08);
+    assert(CapturePreviewResolution(.01,false,false,false)==.01);
+    assert(CapturePreviewResolution(.01,true,true,false)==.01);
+    assert(CapturePreviewResolution(.01,true,false,true)==.01);
+    Dataset d;d.path=argv[1];
+    for(const char* suffix:{".jpg",".mat",".pcl",".bin",".tms"})std::ofstream(d.GetFileName(1,suffix))<<"fixture";
+    Reconstruction r;r.dataset=&d;
+    r.BinderLock();auto done=std::async(std::launch::async,[&]{return r.FinishCapture();});
+    assert(done.wait_for(std::chrono::milliseconds(20))==std::future_status::timeout);
+    r.BinderUnlock();assert(done.get());
+    assert(r.replayCalls==0&&r.scan.resolution==.05); // raw save never builds/exports a mesh
+    r.t3dr_is_running_=true;assert(!r.FinishCapture());r.t3dr_is_running_=false;
+    r.write_failed=true;assert(!r.FinishCapture());r.write_failed=false;
+    d.count=3;assert(!r.FinishCapture());d.count=2;
+    unlink(d.GetFileName(1,".pcl").c_str());assert(!r.FinishCapture());
+    assert(r.PrepareFullResolution()&&r.replayCalls==1&&!r.coverage_preview&&r.scan.resolution==.01);
+    assert(r.PrepareFullResolution()&&r.replayCalls==1);
+    for(int failure=0;failure<2;++failure){
+        Reconstruction broken;broken.dataset=&d;broken.replayOkay=false;broken.scan.fail=failure==1;
+        assert(!broken.PrepareFullResolution());assert(broken.coverage_preview&&broken.scan.recovery&&broken.scan.resolution==.05);
+        assert(broken.binder.try_lock());broken.binder.unlock();assert(broken.render_mutex_.try_lock());broken.render_mutex_.unlock();
+    }
+    puts("PASS capture policy, synchronized raw-save barrier, full-detail replay and no coarse-model export after failure");
+}

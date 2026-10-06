@@ -1,0 +1,502 @@
+// Production definitions are extracted by cloud_run.py. Surrounding camera,
+// persistence orchestration and SDK functions are explicitly instrumented fakes.
+#include <tango/geometry_validation.h>
+#include <thread/frame_writer.h>
+#include <thread/capture_backoff.h>
+#if SCANNER_MODERN
+#include <reconstruction/paging.h>
+#endif
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <iostream>
+#include <limits>
+#include <mutex>
+#include <new>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#define LOGE(...) ((void)0)
+enum class Failure {
+    None, Allocate, Sdk, SdkLimit, SdkInvalid, CacheRead, StatsFailure, NoSegments, MissingIndices,
+    Extract, BadMesh, Distortion, ImageWrite, Preview, CloudOpen,
+    CloudHeader, CloudPayload, CloudClose, Commit, BadPoint, EmptyCloud,
+    BadFrame, BadTimestamp, BadCalibration, BadDistortion, BadImage,
+    Recovery, Paused, InvalidSdkPose, ImageException, PreviewException, CloudException, CommitException
+};
+struct Trace {
+    Failure failure = Failure::None;
+    int allocations = 0, destroys = 0, sdk = 0, extracts = 0;
+    int imageDeletes = 0, unlocks = 0, recoveries = 0, writes = 0;
+    int commits = 0, merges = 0, timings = 0, meshDeletes = 0;
+    bool live = false, committed = false, imageFinished = false;
+    Tango3DR_PointCloud* cloud = nullptr;
+    const Tango3DR_PointCloud* sdkCloud = nullptr;
+    unsigned char* image = nullptr;
+    std::vector<unsigned char> sdkBytes;
+    std::vector<glm::vec4>* source = nullptr;
+    std::string path;
+} trace;
+static std::promise<void>* releaseImage = nullptr;
+static std::shared_future<void> imageReleased;
+static std::promise<void>* commitReached = nullptr;
+#if SCANNER_MODERN
+Tango3DR_Status ScannerReconstruction_getPagingStats(Tango3DR_ReconstructionContext,
+        ScannerReconstruction_PagingStats* stats) {
+    *stats = ScannerReconstruction_PagingStats{};
+    stats->requires_replay = trace.failure == Failure::CacheRead;
+    return trace.failure == Failure::StatsFailure ? TANGO_3DR_ERROR : TANGO_3DR_SUCCESS;
+}
+#endif
+
+// Track YUV delete[] on every exit, including paths that never reach the SDK.
+void* operator new[](std::size_t size) {
+    void* p = std::malloc(size ? size : 1);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
+void operator delete[](void* p) noexcept {
+    if (p && p == trace.image) {
+        ++trace.imageDeletes;
+        trace.image = nullptr;
+    }
+    std::free(p);
+}
+
+std::vector<unsigned char> bytes(const Tango3DR_PointCloud& cloud) {
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(cloud.points);
+    return std::vector<unsigned char>(p, p + cloud.num_points * sizeof(Tango3DR_Vector4));
+}
+
+// Signatures are checked against the real vendor header, including const inputs.
+Tango3DR_Status Tango3DR_PointCloud_init(uint32_t count, Tango3DR_PointCloud* cloud) {
+    assert(!trace.live);
+    ++trace.allocations;
+    trace.cloud = cloud;
+    trace.live = true;
+    if (trace.failure == Failure::Allocate) return TANGO_3DR_ERROR;
+    cloud->num_points = count;
+    cloud->points = new Tango3DR_Vector4[count];
+    return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_PointCloud_destroy(Tango3DR_PointCloud* cloud) {
+    assert(trace.live && cloud == trace.cloud);
+    if (releaseImage) assert(trace.imageFinished);
+    if (trace.sdkCloud) assert(bytes(*cloud) == trace.sdkBytes);
+    delete[] cloud->points;
+    cloud->points = nullptr;
+    ++trace.destroys;
+    trace.live = false;
+    return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_ReconstructionContext_setColorCalibration(
+        Tango3DR_ReconstructionContext, const Tango3DR_CameraCalibration*) {
+    return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_updateFromPointCloud(Tango3DR_ReconstructionContext,
+        const Tango3DR_PointCloud* cloud, const Tango3DR_Pose*,
+        const Tango3DR_ImageBuffer* image, const Tango3DR_Pose*,
+        Tango3DR_GridIndexArray* indices) {
+    assert(trace.live && cloud == trace.cloud && image->data == trace.image);
+    assert(oc::geometry::Cloud(cloud));
+    ++trace.sdk;
+    trace.sdkCloud = cloud;
+    trace.sdkBytes = bytes(*cloud);
+    // Prove the file uses the independent snapshot, not a second Retango copy.
+    if (trace.source) trace.source->assign(1, glm::vec4(9, 8, 7, 0.5f));
+    if (trace.failure == Failure::Sdk) return TANGO_3DR_ERROR;
+    if (trace.failure == Failure::CacheRead || trace.failure == Failure::StatsFailure) return TANGO_3DR_ERROR;
+    if (trace.failure == Failure::SdkLimit) return TANGO_3DR_INSUFFICIENT_SPACE;
+    if (trace.failure == Failure::SdkInvalid) return TANGO_3DR_INVALID;
+    if (trace.failure == Failure::NoSegments) return TANGO_3DR_SUCCESS;
+    indices->num_indices = 2;
+    if (trace.failure != Failure::MissingIndices) {
+        indices->indices = new Tango3DR_GridIndex[2]{};
+        indices->indices[1][0] = 1;
+    }
+    return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_GridIndexArray_destroy(Tango3DR_GridIndexArray* indices) {
+    delete[] indices->indices;
+    indices->indices = nullptr;
+    return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_extractMeshSegment(Tango3DR_ReconstructionContext,
+        const Tango3DR_GridIndex, Tango3DR_Mesh* mesh) {
+    ++trace.extracts;
+    // Fail the second segment to exercise cleanup of already-added geometry.
+    if (trace.extracts == 2 && trace.failure == Failure::Extract) return TANGO_3DR_ERROR;
+    if (trace.extracts == 2 && trace.failure == Failure::BadMesh) mesh->num_faces = 1;
+    return TANGO_3DR_SUCCESS; // empty clearing segments are valid production meshes
+}
+Tango3DR_Status Tango3DR_Mesh_destroy(Tango3DR_Mesh*) {
+    ++trace.meshDeletes;
+    return TANGO_3DR_SUCCESS;
+}
+
+FILE* cloudOpen(const char* path, const char* mode) {
+    ++trace.writes;
+    assert(trace.live && trace.cloud == trace.sdkCloud);
+    if (trace.failure == Failure::CloudException) throw std::bad_alloc();
+    return trace.failure == Failure::CloudOpen ? nullptr : std::fopen(path, mode);
+}
+size_t cloudWrite(const void* data, size_t size, size_t count, FILE* file) {
+    if (size == sizeof(Tango3DR_Vector4)) {
+        assert(data == trace.cloud->points);
+        assert(bytes(*trace.cloud) == trace.sdkBytes);
+        if (trace.failure == Failure::CloudPayload) return 0;
+    } else if (trace.failure == Failure::CloudHeader) return 0;
+    return std::fwrite(data, size, count, file);
+}
+int cloudClose(FILE* file) {
+    int result = std::fclose(file);
+    return trace.failure == Failure::CloudClose ? EOF : result;
+}
+
+namespace oc {
+enum { COLOR_CAMERA, OPENGL_CAMERA, SCREEN_CAMERA };
+struct GridIndex { Tango3DR_GridIndex indices; };
+struct Component {};
+struct Image {
+    bool IsValid() const { return trace.failure != Failure::BadImage; }
+    int GetWidth() const { return 360; }
+    int GetHeight() const { return 640; }
+    unsigned char* ExtractYUVDownscaled(int) {
+        assert(!trace.image);
+        trace.image = new unsigned char[16]{};
+        return trace.image;
+    }
+};
+struct Retango {
+    std::vector<glm::vec4> output;
+    Tango3DR_PointCloud* PCL(double timestamp);
+    void ADD(std::vector<glm::vec4>& points, glm::mat4, Image*) {
+        output = points; // Fixture input is already camera-space; PCL is production.
+        if (trace.failure == Failure::BadPoint) output[0].z = -1;
+        if (trace.failure == Failure::EmptyCloud) output.clear();
+        trace.source = &output;
+    }
+    void ADD(const std::vector<Component>&, glm::mat4, bool) { assert(!trace.live); }
+    void RES(float resolution) { assert(!trace.live && resolution==.01f); }
+    void UPD(Image*, glm::mat4, bool) { assert(!trace.live); }
+};
+struct TangoScan {
+    Tango3DR_ReconstructionContext context = reinterpret_cast<Tango3DR_ReconstructionContext>(1);
+    bool update_failed = false;
+    bool update_rejected = false;
+    bool update_accepted = false;
+    int64_t last_rejection_log_ms = -5000;
+    int last_rejection_status = 0;
+    int graph = 0, compo = 0, merge = 0;
+    std::vector<std::pair<GridIndex, Tango3DR_Mesh*>> added;
+    // PRODUCTION_DECLARATION
+    void DiscardAdded();
+    Tango3DR_ReconstructionContext Context() { return context; }
+    bool SetColorCalibration(const Tango3DR_CameraCalibration& camera) {
+        return Tango3DR_ReconstructionContext_setColorCalibration(context, &camera) == TANGO_3DR_SUCCESS;
+    }
+    bool UpdateFailed() { return update_failed; }
+    bool UpdateRejected() { return update_rejected; }
+    bool UpdateAccepted() { return update_accepted; }
+    void RequireRecovery() { update_failed = true; }
+    const std::vector<std::pair<GridIndex, Tango3DR_Mesh*>>& Added() { return added; }
+    void Merge() {
+        assert(trace.committed && !trace.live);
+        ++trace.merges;
+        DiscardAdded();
+    }
+    float Resolution() { return 0.05f; } // coarse preview must not affect recorded-point policy
+    std::vector<Component> Components() { return {}; }
+    void GenerateGraph() {}
+    void GenerateComponents() {}
+    void MergeComponents() {}
+    ~TangoScan() { DiscardAdded(); }
+};
+struct Dataset {
+    std::string GetFileName(int index, const char* suffix) {
+        assert(index == 5 && std::string(suffix) == ".pcl");
+        return trace.path;
+    }
+    bool WritePointCloud(int index, Tango3DR_PointCloud cloud);
+    bool WriteDistortion(const std::vector<float>&) { return trace.failure != Failure::Distortion; }
+    bool WritePreview(int, const std::vector<std::pair<GridIndex, Tango3DR_Mesh*>>&) {
+        assert(trace.live);
+        if (releaseImage) releaseImage->set_value();
+        if (trace.failure == Failure::PreviewException) throw std::bad_alloc();
+        return trace.failure != Failure::Preview;
+    }
+};
+struct TangoTexturize {
+    Tango3DR_Pose Extract3DRPose(glm::mat4) {
+        Tango3DR_Pose pose = {};
+        pose.orientation[3] = trace.failure == Failure::InvalidSdkPose ? 0 : 1;
+        return pose;
+    }
+    int GetLatestIndex(Dataset*) { return 4; }
+    bool Add(Image*, double, Tango3DR_CameraCalibration*, std::vector<glm::mat4>&, Dataset*) {
+        assert(trace.live);
+        if (releaseImage) imageReleased.wait();
+        trace.imageFinished = true;
+        if (trace.failure == Failure::ImageException) throw std::bad_alloc();
+        return trace.failure != Failure::ImageWrite;
+    }
+    bool Commit(Tango3DR_CameraCalibration*, Dataset*) {
+        assert(!trace.live && trace.destroys == 1);
+        if (trace.failure == Failure::CommitException) throw std::bad_alloc();
+        ++trace.commits;
+        if (commitReached) commitReached->set_value();
+        return trace.committed = trace.failure != Failure::Commit;
+    }
+};
+struct Reconstruction {
+    Dataset storage;
+    Dataset* dataset = &storage;
+    Image image;
+    Image* frame_image = &image;
+    Retango depth;
+    TangoScan scan;
+    TangoTexturize texturize;
+    std::vector<glm::vec4> frame_points{glm::vec4(-0.0f, 0.1234567f, 2, 0.25f),
+                                       glm::vec4(-1, 0.875f, 3.125f, 1)};
+    std::vector<glm::mat4> frame_pose{glm::mat4(1), glm::mat4(1), glm::mat4(1)};
+    glm::mat4 frame_viewmat{1}, frame_calibration{1};
+    double frame_timestamp = 123.456;
+    double capture_resolution = .01;
+    std::vector<float> frame_distortion{0, 0, 0}, persisted_distortion;
+    bool distortion_persisted = false, frame_sparse = true, holes_filling = true;
+    bool photo_mode = false, request_newprojection = false;
+    std::atomic<bool> t3dr_is_running_{true}, write_failed{false};
+    std::atomic<int> recovery_state{0};
+    CaptureBackoff capture_backoff;
+    int frame_index = 4, committed_frames = 5, preview_cache_last = 4;
+    std::unordered_map<int, int> preview_history{{1, 1}};
+    std::mutex render_mutex_, scan_mutex_;
+    std::chrono::steady_clock::time_point frame_capture_started = std::chrono::steady_clock::now();
+    bool RecoverScan() {
+        assert(!trace.live); // In particular, failure recovery must not retain the frame cloud.
+        ++trace.recoveries;
+        return trace.failure != Failure::Recovery;
+    }
+    void BinderUnlock() {
+        assert(!trace.live && !trace.image);
+        ++trace.unlocks;
+    }
+    Tango3DR_CameraCalibration GetCalibration(int) {
+        Tango3DR_CameraCalibration camera = {};
+        camera.fx = trace.failure == Failure::BadCalibration ? 0 : 100;
+        camera.fy = 100;
+        return camera;
+    }
+    void RecordCaptureTimings(const double*) { ++trace.timings; }
+    // Experimental NN transaction has its own tests/depth_capture boundary suite.
+    void ApplyExperimentalDepth() {}
+};
+Reconstruction* g_reconstruction = nullptr;
+
+#define ANDROID
+// PRODUCTION_PCL
+#undef ANDROID
+// PRODUCTION_DISCARD
+// PRODUCTION_UPDATE
+// PRODUCTION_WORKER
+
+// Only the real writer's libc boundaries are intercepted. Its serialization and
+// status handling run unchanged and successful writes go to a real temp file.
+#define fopen cloudOpen
+#define fwrite cloudWrite
+#define fclose cloudClose
+// PRODUCTION_WRITE
+#undef fopen
+#undef fwrite
+#undef fclose
+} // namespace oc
+
+void workerCase(Failure failure, const std::string& path) {
+    trace = Trace();
+    trace.failure = failure;
+    trace.path = path;
+    std::remove(path.c_str());
+    oc::Reconstruction reconstruction;
+    oc::g_reconstruction = &reconstruction;
+    switch (failure) {
+        case Failure::BadFrame: reconstruction.frame_viewmat[0][0] = 0; break;
+        case Failure::BadTimestamp:
+            reconstruction.frame_timestamp = std::numeric_limits<double>::quiet_NaN(); break;
+        case Failure::BadDistortion:
+            reconstruction.frame_distortion[0] = std::numeric_limits<float>::infinity(); break;
+        case Failure::Paused: reconstruction.t3dr_is_running_ = false; break;
+        default: break;
+    }
+    const auto original = reconstruction.frame_points;
+    oc::ProcessReconstruction(nullptr);
+    assert(trace.unlocks == 1 && !trace.live && !trace.image);
+    const bool early = failure == Failure::BadFrame || failure == Failure::BadTimestamp ||
+        failure == Failure::BadCalibration || failure == Failure::BadDistortion ||
+        failure == Failure::BadImage || failure == Failure::Recovery || failure == Failure::Paused;
+    assert(trace.allocations == (early ? 0 : 1));
+    assert(trace.destroys == trace.allocations);
+    assert(trace.imageDeletes == (early ? 0 : 1));
+    const bool rejected = early || failure == Failure::Allocate || failure == Failure::BadPoint ||
+        failure == Failure::EmptyCloud || failure == Failure::InvalidSdkPose;
+    assert(trace.sdk == (rejected ? 0 : 1));
+    const bool sdkFailed = failure == Failure::Sdk || failure == Failure::SdkLimit || failure == Failure::SdkInvalid ||
+        failure == Failure::CacheRead || failure == Failure::StatsFailure ||
+        failure == Failure::NoSegments || failure == Failure::MissingIndices ||
+        failure == Failure::Extract || failure == Failure::BadMesh;
+    const bool atomicRejection = failure == Failure::Sdk || failure == Failure::SdkLimit;
+    const bool needsRecovery = (!SCANNER_MODERN && atomicRejection) || failure == Failure::MissingIndices ||
+        failure == Failure::CacheRead || failure == Failure::StatsFailure ||
+        failure == Failure::Extract || failure == Failure::BadMesh;
+    const bool writeFailed = !rejected && !sdkFailed && failure != Failure::None;
+    assert(reconstruction.scan.UpdateFailed() == (needsRecovery || writeFailed));
+    assert(reconstruction.write_failed.load() == writeFailed);
+    if (needsRecovery) assert(trace.recoveries == 2);
+    assert(reconstruction.scan.UpdateRejected() == (SCANNER_MODERN && atomicRejection));
+    assert(reconstruction.recovery_state.load() == (SCANNER_MODERN && atomicRejection ? 3 : 0));
+    if (SCANNER_MODERN && atomicRejection) assert(trace.recoveries == 1);
+    assert(reconstruction.frame_index == (failure == Failure::None ? 5 : 4));
+    assert(reconstruction.committed_frames == (failure == Failure::None ? 6 : 5));
+    assert(trace.merges == (failure == Failure::None ? 1 : 0));
+    assert(trace.timings == trace.merges);
+    assert(reconstruction.scan.added.empty());
+    if (failure == Failure::None) {
+        assert(trace.commits == 1 && trace.writes == 1 && trace.meshDeletes == 2);
+        FILE* file = std::fopen(path.c_str(), "rb");
+        assert(file);
+        uint32_t count = 0;
+        assert(std::fread(&count, sizeof(count), 1, file) == 1 && count == original.size());
+        std::vector<unsigned char> payload(count * sizeof(Tango3DR_Vector4));
+        assert(std::fread(payload.data(), 1, payload.size(), file) == payload.size());
+        assert(std::fgetc(file) == EOF);
+        std::fclose(file);
+        assert(payload == trace.sdkBytes);
+        // Independent expected legacy file bytes: count + original float4 values.
+        std::vector<unsigned char> expected;
+        for (const auto& point : original) {
+            const float values[4] = {point.x, point.y, point.z, point.w};
+            const auto* p = reinterpret_cast<const unsigned char*>(values);
+            expected.insert(expected.end(), p, p + sizeof(values));
+        }
+        assert(payload == expected);
+    }
+}
+
+void directValidationCases() {
+    for (int which = 0; which < 9; ++which) {
+        trace = Trace();
+        oc::TangoScan scan;
+        Tango3DR_Vector4 point[1] = {{1, 2, 3, 1}};
+        Tango3DR_PointCloud cloud = {};
+        cloud.num_points = 1;
+        cloud.points = point;
+        cloud.timestamp = 1;
+        Tango3DR_Pose pose = {};
+        pose.orientation[3] = 1;
+        Tango3DR_ImageBuffer image = {};
+        image.width = image.height = image.stride = 2;
+        trace.image = image.data = new unsigned char[6]{};
+        if (which == 1) cloud.timestamp = std::numeric_limits<double>::infinity();
+        if (which == 2) point[0][0] = std::numeric_limits<float>::quiet_NaN();
+        if (which == 3) point[0][3] = 0;
+        if (which == 4) pose.orientation[3] = 0;
+        if (which == 5) image.stride = 1;
+        if (which == 6) scan.context = nullptr;
+        if (which == 7) scan.update_failed = true;
+        if (which == 8) cloud.points = nullptr;
+        assert(!scan.Update(which == 0 ? nullptr : &cloud, &pose, &image, &pose, false));
+        assert(image.data == nullptr && trace.imageDeletes == 1);
+        assert(trace.allocations == 0 && trace.destroys == 0 && trace.sdk == 0);
+        assert(scan.UpdateFailed() == (which == 7));
+    }
+}
+
+void publicationLockCases(const std::string& path) {
+    // The actual worker must finish while the camera/display owns render_mutex_.
+    // Conversely it must retain the frame until an active mesh reader releases
+    // scan_mutex_. Use a commit handshake, not a scheduler timing assumption.
+    for (bool drawingMesh : {false, true}) {
+        trace = Trace(); trace.path = path;
+        oc::Reconstruction reconstruction;
+        oc::g_reconstruction = &reconstruction;
+        std::promise<void> committed;
+        auto reached = committed.get_future(); commitReached = &committed;
+        std::unique_lock<std::mutex> camera(reconstruction.render_mutex_);
+        std::unique_lock<std::mutex> mesh(reconstruction.scan_mutex_, std::defer_lock);
+        if (drawingMesh) mesh.lock();
+        auto worker = std::async(std::launch::async, [] { oc::ProcessReconstruction(nullptr); });
+        assert(reached.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+        if (drawingMesh) {
+            assert(worker.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout);
+            mesh.unlock();
+        }
+        assert(worker.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+        worker.get(); commitReached = nullptr;
+        assert(trace.commits == 1 && trace.merges == 1 && trace.unlocks == 1);
+        assert(reconstruction.committed_frames == 6 && !trace.live && !trace.image);
+        assert(reconstruction.scan_mutex_.try_lock()); reconstruction.scan_mutex_.unlock();
+    }
+    std::cout << "PASS: capture publication bypasses camera/display lock; active mesh reader still excludes merge\n";
+}
+
+void retryAtomicRejections(const std::string& path) {
+#if SCANNER_MODERN
+    oc::Reconstruction reconstruction;
+    oc::g_reconstruction = &reconstruction;
+    for (Failure failure : {Failure::SdkLimit, Failure::SdkLimit, Failure::Sdk,
+                            Failure::SdkInvalid, Failure::InvalidSdkPose, Failure::NoSegments, Failure::None}) {
+        trace = Trace();
+        trace.path = path;
+        trace.failure = failure;
+        oc::ProcessReconstruction(nullptr);
+        assert(!reconstruction.scan.UpdateFailed());
+        assert(reconstruction.t3dr_is_running_.load());
+        assert(trace.recoveries == 1 && trace.unlocks == 1);
+        assert(trace.allocations == 1 && trace.destroys == 1 && trace.imageDeletes == 1);
+        if (failure != Failure::None) {
+            assert(reconstruction.committed_frames == 5 && trace.merges == 0 && trace.writes == 0);
+            assert(reconstruction.recovery_state.load() == (failure == Failure::NoSegments ? 0 : 3));
+        } else {
+            assert(reconstruction.committed_frames == 6 && trace.merges == 1);
+            assert(reconstruction.recovery_state.load() == 0 && !reconstruction.scan.UpdateRejected());
+        }
+    }
+#else
+    (void)path;
+#endif
+}
+
+int main(int argc, char** argv) {
+    assert(argc == 2);
+    int cases = 0;
+    for (Failure failure : {Failure::None, Failure::Allocate, Failure::Sdk, Failure::SdkLimit, Failure::SdkInvalid,
+            Failure::CacheRead, Failure::StatsFailure,
+            Failure::NoSegments, Failure::MissingIndices, Failure::Extract, Failure::BadMesh,
+            Failure::Distortion, Failure::ImageWrite, Failure::Preview, Failure::CloudOpen,
+            Failure::CloudHeader, Failure::CloudPayload, Failure::CloudClose, Failure::Commit,
+            Failure::BadPoint, Failure::EmptyCloud, Failure::BadFrame, Failure::BadTimestamp,
+            Failure::BadCalibration, Failure::BadDistortion, Failure::BadImage, Failure::Recovery,
+            Failure::Paused, Failure::InvalidSdkPose, Failure::ImageException,
+            Failure::PreviewException, Failure::CloudException, Failure::CommitException}) {
+        workerCase(failure, argv[1]);
+        ++cases;
+    }
+    directValidationCases();
+    publicationLockCases(argv[1]);
+    retryAtomicRejections(argv[1]);
+#if SCANNER_MODERN
+    for (Failure failure : {Failure::None, Failure::Preview, Failure::ImageWrite}) {
+        std::promise<void> release;
+        imageReleased = release.get_future().share();
+        releaseImage = &release;
+        workerCase(failure, argv[1]);
+        releaseImage = nullptr;
+    }
+#endif
+    std::cout << "PASS (modern=" << SCANNER_MODERN << "): " << cases << " production worker cases + 9 borrowed-cloud validation cases; "
+              << "single construction, identical persisted bytes, exactly-once cleanup before unlock\n";
+}

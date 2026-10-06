@@ -1,0 +1,69 @@
+// Production CreateContext body, with SDK allocation/setup boundaries injected.
+#include <tango/paging_policy.h>
+#include <tango_3d_reconstruction_api.h>
+#include <reconstruction/paging.h>
+#include <cassert>
+#include <cmath>
+#include <iostream>
+#include <string>
+#define LOGE(...) ((void)0)
+
+static int configs, contexts, pagingCalls;
+static bool failConfig, failContext, failPaging;
+static int frameLimit;
+Tango3DR_Config Tango3DR_Config_create(Tango3DR_ConfigType) {
+    ++configs; return reinterpret_cast<Tango3DR_Config>(new int(1));
+}
+Tango3DR_Status Tango3DR_Config_destroy(Tango3DR_Config value) {
+    --configs; delete reinterpret_cast<int*>(value); return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_Config_setDouble(Tango3DR_Config, const char*, double) {
+    return failConfig ? TANGO_3DR_ERROR : TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status Tango3DR_Config_setBool(Tango3DR_Config, const char*, bool) { return TANGO_3DR_SUCCESS; }
+Tango3DR_Status Tango3DR_Config_setInt32(Tango3DR_Config, const char* key, int32_t value) {
+    if (std::string(key) == "max_update_chunks") frameLimit = value;
+    return TANGO_3DR_SUCCESS;
+}
+Tango3DR_ReconstructionContext Tango3DR_ReconstructionContext_create(const Tango3DR_Config) {
+    if (failContext) return nullptr;
+    ++contexts; return reinterpret_cast<Tango3DR_ReconstructionContext>(new int(2));
+}
+Tango3DR_Status Tango3DR_ReconstructionContext_destroy(Tango3DR_ReconstructionContext value) {
+    --contexts; delete reinterpret_cast<int*>(value); return TANGO_3DR_SUCCESS;
+}
+Tango3DR_Status ScannerReconstruction_enablePaging(Tango3DR_ReconstructionContext value,
+        const char* directory, uint64_t resident, uint64_t disk, uint32_t chunks) {
+    assert(value && std::string(directory) == "private-cache");
+    assert(resident == 96u*1024u*1024u && disk == uint64_t(1024)*1024*1024 && chunks == 7680);
+    ++pagingCalls;
+    return failPaging ? TANGO_3DR_ERROR : TANGO_3DR_SUCCESS;
+}
+namespace oc {
+// PRODUCTION_CREATE_CONTEXT
+}
+int main() {
+    const auto plan = oc::PlanPaging(.02, uint64_t(16)<<30, uint64_t(8)<<30);
+    for (int failure = 0; failure < 4; ++failure) {
+        failConfig = failure == 1; failContext = failure == 2; failPaging = failure == 3;
+        pagingCalls = 0;
+        frameLimit = 256;
+        auto context = oc::CreateContext(.02, .01, 4, 9, true, "private-cache", plan);
+        const bool success = failure == 0 || (!SCANNER_MODERN && failure == 3);
+        assert(bool(context) == success);
+        assert(configs == 0 && contexts == int(success));
+        assert(pagingCalls == (SCANNER_MODERN && (failure == 0 || failure == 3) ? 1 : 0));
+        assert(frameLimit == (SCANNER_MODERN && failure != 1 ? 512 : 256));
+        if (context) Tango3DR_ReconstructionContext_destroy(context);
+        assert(contexts == 0);
+    }
+    failConfig = failContext = failPaging = false;
+    pagingCalls = 0;
+    auto fallback = oc::CreateContext(.02, .01, 4, 9, true, "", oc::PagingPlan());
+    assert(fallback && pagingCalls == 0);
+    Tango3DR_ReconstructionContext_destroy(fallback);
+    assert(!oc::CreateContext(0, .01, 4, 9, true, "private-cache", plan));
+    assert(configs == 0 && contexts == 0);
+    std::cout << "PASS: context/paging startup failure cleanup and explicit RAM-only fallback, modern="
+              << SCANNER_MODERN << "\n";
+}
