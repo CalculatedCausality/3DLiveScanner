@@ -1,5 +1,7 @@
 # Content of this repository
 
+The scanner UI is English-only.
+
 ## scanner
 The main project of this repository containing 3D Live Scanner: https://youtu.be/ku_Slo-li3c
 

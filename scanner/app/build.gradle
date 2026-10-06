@@ -10,6 +10,7 @@ android {
         namespace ="com.lvonasek.arcore3dscanner"
         minSdkVersion 24
         targetSdkVersion 33
+        resourceConfigurations += ['en']
         manifestPlaceholders = ['appAuthRedirectScheme': 'https://lvonasek.github.io/redirect.html']
         multiDexEnabled true
         ndk {
