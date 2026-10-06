@@ -1,6 +1,5 @@
 package com.lvonasek.arcore3dscanner.ui;
 
-import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -13,25 +12,21 @@ import com.lvonasek.arcore3dscanner.main.Exporter;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 class FolderAdapter extends BaseAdapter
 {
-  interface PathChangeLister {
-
-    void onPathChanged(String path);
-  }
-
-  private FileManager mContext;
-  private PathChangeLister mListener;
-  private String mPath;
+  private final FileManager mContext;
+  private final Consumer<String> mListener;
+  private File mPath;
 
   private final ArrayList<String> mItems = new ArrayList<>();
 
-  FolderAdapter(FileManager context, String path, PathChangeLister listener)
+  FolderAdapter(FileManager context, String path, Consumer<String> listener)
   {
     mContext = context;
     mListener = listener;
-    mPath = path;
+    mPath = new File(path).getAbsoluteFile();
   }
 
   @Override
@@ -56,8 +51,7 @@ class FolderAdapter extends BaseAdapter
   public View getView(final int index, View view, ViewGroup viewGroup)
   {
     if (view == null) {
-      LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-      view = inflater.inflate(R.layout.view_folder, viewGroup, false);
+      view = LayoutInflater.from(mContext).inflate(R.layout.view_folder, viewGroup, false);
     }
     String key = (String)getItem(index);
     TextView name = view.findViewById(R.id.name);
@@ -77,41 +71,37 @@ class FolderAdapter extends BaseAdapter
     //set open action
     view.setOnClickListener(v -> {
       if (key.compareTo(mContext.getString(R.string.folder_up)) == 0) {
-        mPath = new File(mPath).getParentFile().getAbsolutePath();
+        mPath = mPath.getParentFile();
       } else {
         File folder = new File(mPath, key);
         if (key.compareTo(mContext.getString(R.string.folder_new)) == 0) {
           folder.mkdir();
           mContext.refreshUI();
         }
-        mPath = folder.getAbsolutePath();
+        mPath = folder;
       }
-      mListener.onPathChanged(mPath);
+      mListener.accept(mPath.getAbsolutePath());
       update();
     });
 
     return view;
   }
 
-  public String getPath() {
-    return new File(mPath).getAbsolutePath();
-  }
-
   public void update() {
     mItems.clear();
-    if ((getPath() + "/").compareTo(AbstractActivity.getPath(false)) != 0) {
+    if (!mPath.equals(new File(AbstractActivity.getPath(false)))) {
       mItems.add(mContext.getString(R.string.folder_up));
     }
 
     boolean newFolderExist = false;
-    String[] files = new File(getPath()).list();
+    String[] files = mPath.list();
     if (files != null) {
       Arrays.sort(files);
       for (String s : files) {
         if (s.compareTo(mContext.getString(R.string.folder_new)) == 0) {
           newFolderExist = true;
         }
-        File f = new File(getPath(), s);
+        File f = new File(mPath, s);
         if (f.isDirectory() && Exporter.isFolder(s)
                 && !f.getAbsolutePath().equals(mContext.getTempPath().getAbsolutePath())) {
           mItems.add(s);

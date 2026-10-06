@@ -35,8 +35,9 @@ public class CommonDialogs {
                 : (finish ? R.string.action_finish_scan : title));
         dialog.setMessage(discard ? R.string.scan_discard_message
                 : (finish ? R.string.scan_finish_message : R.string.continue_question));
-        dialog.setPositiveButton(discard ? R.string.scan_discard_short
-                : (finish ? R.string.scan_finish_short : android.R.string.ok), (d, which) -> proceed.run());
+    dialog.setPositiveButton(discard ? R.string.scan_discard_short
+                : (finish ? R.string.scan_finish_short
+                : (title == R.string.delete ? R.string.delete : android.R.string.ok)), (d, which) -> proceed.run());
         dialog.setNegativeButton(android.R.string.cancel, null);
         AlertDialog d = dialog.create();
         d.setOnDismissListener(dialogInterface -> setImmersive(context.getWindow()));

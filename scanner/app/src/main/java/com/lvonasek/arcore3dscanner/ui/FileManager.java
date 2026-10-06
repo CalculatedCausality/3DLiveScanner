@@ -14,7 +14,6 @@ import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.GridView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -43,7 +42,6 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
   private GridView mList;
   private Button mAdd;
   private Button mCancel;
-  private CheckBox mCheckbox;
   private ProgressBar mProgress;
   private TextView mText;
   private View mHeader;
@@ -85,7 +83,6 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
 
     mAdd = findViewById(R.id.add_button);
     mCancel = findViewById(R.id.service_cancel);
-    mCheckbox = findViewById(R.id.checkbox);
     mList = findViewById(R.id.list);
     mText = findViewById(R.id.info_text);
     mProgress = findViewById(R.id.progressBar);
@@ -166,9 +163,9 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
           });
         }
       }).start();
-    } else if (Service.getRunning(this) < Service.SERVICE_NOT_RUNNING)
+    } else if (service < Service.SERVICE_NOT_RUNNING)
     {
-      service = Math.abs(Service.getRunning(this));
+      service = Math.abs(service);
       mAdd.setVisibility(View.GONE);
       if (service != Service.SERVICE_SAVE) {
         mCancel.setVisibility(View.VISIBLE);
@@ -204,7 +201,7 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
       Log.d(TAG, "Some files has to be migrated");
     }
     mCancel.setVisibility(View.GONE);
-    mCheckbox.setVisibility(View.GONE);
+    findViewById(R.id.checkbox).setVisibility(View.GONE);
     mCancel.setEnabled(true);
     mAdd.setVisibility(View.GONE);
     mList.setVisibility(View.VISIBLE);
@@ -358,12 +355,8 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
 
   public void showProgress()
   {
-    try {
-      mAdd.setVisibility(View.GONE);
-      mProgress.setVisibility(View.VISIBLE);
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
+    mAdd.setVisibility(View.GONE);
+    mProgress.setVisibility(View.VISIBLE);
   }
 
   @Override
@@ -417,7 +410,7 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
     ArrayList<String> values = new ArrayList<>();
     if (Compatibility.isARSupported(this)) {
       boolean captureFirst="modern".equals(com.lvonasek.arcore3dscanner.BuildConfig.FLAVOR);
-      if(captureFirst&&isProVersion(this)) {
+      if (captureFirst) {
         icons.add(getDrawable(R.drawable.ic_type_dataset));
         values.add(getString(R.string.mode_dataset));
       }
@@ -425,7 +418,7 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
       values.add(getString(R.string.mode_face));
       icons.add(getDrawable(R.drawable.ic_type_scan));
       values.add(getString(R.string.mode_realtime));
-      if (isProVersion(this)&&!captureFirst) {
+      if (!captureFirst) {
         icons.add(getDrawable(R.drawable.ic_type_dataset));
         values.add(getString(R.string.mode_dataset));
       }
@@ -496,7 +489,6 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
             .setTitle(R.string.recovery_title)
             .setMessage(mInterruptedScan == 1 ? R.string.recovery_message : R.string.recovery_corrupt)
             .setNegativeButton(R.string.delete, (dialog, which) -> {
-              mRecoveryDialogVisible = false;
               File source = getTempPath();
               showProgress();
               new Thread(() -> {
@@ -504,7 +496,7 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
                 runOnUiThread(this::refreshUI);
               }, "discard-capture").start();
             })
-            .setNeutralButton(R.string.recovery_keep, (dialog, which) -> mRecoveryDialogVisible = false)
+            .setNeutralButton(R.string.recovery_keep, null)
             .setOnDismissListener(dialog -> mRecoveryDialogVisible = false);
     if (mInterruptedScan == 1) {
       builder.setPositiveButton(R.string.recovery_finalize, (dialog, which) -> recoverInterruptedDataset());
@@ -515,7 +507,6 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
   }
 
   private void recoverInterruptedDataset() {
-    mRecoveryDialogVisible = false;
     showProgress();
     new Thread(() -> {
       File source = getTempPath();
@@ -555,9 +546,7 @@ public class FileManager extends AbstractActivity implements View.OnClickListene
     mExportInProgress = true;
     mCancel.setVisibility(View.GONE);
     showProgress();
-    Date date = new Date() ;
-    SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
-    final String filename = dateFormat.format(date);
+    final String filename = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
     final String source = Service.getLink(this);
 
     new Thread(() -> {

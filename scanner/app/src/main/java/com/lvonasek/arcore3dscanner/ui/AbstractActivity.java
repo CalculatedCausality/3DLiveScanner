@@ -19,7 +19,6 @@ import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 
-import com.lvonasek.arcore3dscanner.main.Exporter;
 import com.lvonasek.utils.Compass;
 import com.lvonasek.utils.Compatibility;
 import com.lvonasek.utils.IO;
@@ -28,7 +27,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class AbstractActivity extends Activity {
   protected static final String DELETE_POSTFIX = ".#$%";
@@ -43,8 +41,6 @@ public abstract class AbstractActivity extends Activity {
   protected Runnable onPermissionFail = null;
   protected Runnable onPermissionSuccess = null;
   private static final ArrayList<File> toDelete = new ArrayList<>();
-  private static final AtomicBoolean migrationActive = new AtomicBoolean(false);
-  private static final AtomicBoolean restartApp = new AtomicBoolean(false);
   private static volatile File storageRoot;
   private static boolean appStorage;
   private static CaptureWorkspace captureWorkspace;
@@ -140,10 +136,6 @@ public abstract class AbstractActivity extends Activity {
     return dp * ((float) getResources().getDisplayMetrics().densityDpi / DisplayMetrics.DENSITY_DEFAULT);
   }
 
-  public float convertPxToDp(float px) {
-    return px / ((float) getResources().getDisplayMetrics().densityDpi / DisplayMetrics.DENSITY_DEFAULT);
-  }
-
   public static void deleteOnBackground(File file) {
     synchronized (toDelete) {
 
@@ -185,21 +177,17 @@ public abstract class AbstractActivity extends Activity {
   }
 
   public int getNavigationBarHeight() {
-    Resources resources = getResources();
-    int resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android");
-    if (resourceId > 0) {
-      return resources.getDimensionPixelSize(resourceId);
-    }
-    return 0;
+    return getSystemBarHeight("navigation_bar_height");
   }
 
   public int getStatusBarHeight() {
-    int result = 0;
-    int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
-    if (resourceId > 0) {
-      result = getResources().getDimensionPixelSize(resourceId);
-    }
-    return result;
+    return getSystemBarHeight("status_bar_height");
+  }
+
+  private int getSystemBarHeight(String name) {
+    Resources resources = getResources();
+    int resourceId = resources.getIdentifier(name, "dimen", "android");
+    return resourceId > 0 ? resources.getDimensionPixelSize(resourceId) : 0;
   }
 
   public abstract int getNavigationBarColor();
@@ -228,10 +216,6 @@ public abstract class AbstractActivity extends Activity {
   {
     SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
     return pref.getString(context.getString(com.lvonasek.arcore3dscanner.R.string.pref_mode), "realtime").compareTo("face") == 0;
-  }
-
-  public static boolean isProVersion(Context context) {
-    return true;
   }
 
   public static boolean isPostProcessLaterOn(Context context) {
@@ -371,23 +355,13 @@ public abstract class AbstractActivity extends Activity {
   }
 
   public static String getPath(boolean migrate) {
-    String olddir = Environment.getExternalStorageDirectory().getPath() + OLD_MODEL_DIRECTORY;
-    String newdir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).getPath() + OLD_MODEL_DIRECTORY;
     File chosen = storageRoot;
     if (chosen == null) throw new IllegalStateException("Scan library has not been initialized");
     String dir = chosen.getAbsolutePath() + File.separator;
 
     if (migrate && !appStorage) {
-      synchronized (migrationActive) {
-        migrationActive.set(true);
-      }
-      migrate(olddir, dir);
-      migrate(newdir, dir);
-      synchronized (migrationActive) {
-        migrationActive.set(false);
-        if (restartApp.get()) {
-          System.exit(0);
-        }
+      for (File legacy : getLegacyLibraries()) {
+        migrate(legacy, chosen);
       }
     }
     return dir;
@@ -410,20 +384,11 @@ public abstract class AbstractActivity extends Activity {
     if (pref.getBoolean(key, false)) {
       return false;
     }
-    SharedPreferences.Editor e = pref.edit();
-    e.putBoolean(key, true);
-    e.commit();
+    pref.edit().putBoolean(key, true).commit();
 
-    String olddir = Environment.getExternalStorageDirectory().getPath() + OLD_MODEL_DIRECTORY;
-    String newdir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).getPath() + OLD_MODEL_DIRECTORY;
-    if (new File(olddir).exists()) {
-      File[] files = new File(olddir).listFiles();
-      if ((files != null) && (files.length > 0)) {
-        return true;
-      }
-    }
-    if (new File(newdir).exists()) {
-      File[] files = new File(newdir).listFiles();
+    for (File legacy : getLegacyLibraries()) {
+      if (!legacy.exists()) continue;
+      File[] files = legacy.listFiles();
       if ((files != null) && (files.length > 0)) {
         return true;
       }
@@ -431,26 +396,30 @@ public abstract class AbstractActivity extends Activity {
     return false;
   }
 
-  private static void migrate(String olddir, String newdir) {
+  private static File[] getLegacyLibraries() {
+    return new File[] {
+        new File(Environment.getExternalStorageDirectory().getPath() + OLD_MODEL_DIRECTORY),
+        new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).getPath() + OLD_MODEL_DIRECTORY)
+    };
+  }
+
+  private static void migrate(File olddir, File newdir) {
     Log.d(TAG, "Migrating " + olddir + " into " + newdir);
-    if (new File(olddir).exists()) {
-      boolean ok = true;
-      File[] files = new File(olddir).listFiles();
-      if (files != null) {
-        for (File file : files) {
-          if (file.renameTo(new File(newdir, file.getName()))) {
-            Log.d(TAG, file.getName() + " migrated");
-          } else {
-            Log.d(TAG, "Unable to migrate " + file.getName());
-            ok = false;
-          }
+    if (!olddir.exists()) return;
+    boolean ok = true;
+    File[] files = olddir.listFiles();
+    if (files != null) {
+      for (File file : files) {
+        if (file.renameTo(new File(newdir, file.getName()))) {
+          Log.d(TAG, file.getName() + " migrated");
+        } else {
+          Log.d(TAG, "Unable to migrate " + file.getName());
+          ok = false;
         }
       }
-      if (ok) {
-        if (new File(olddir).delete()) {
-          Log.d(TAG, "Directory " + olddir + " deleted");
-        }
-      }
+    }
+    if (ok && olddir.delete()) {
+      Log.d(TAG, "Directory " + olddir + " deleted");
     }
   }
 }

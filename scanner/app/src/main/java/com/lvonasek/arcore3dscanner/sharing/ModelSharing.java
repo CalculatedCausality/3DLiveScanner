@@ -82,9 +82,13 @@ public final class ModelSharing {
 
   /** Actual ACTION_SEND and chooser both carry ClipData and explicit read permission. */
   public static Intent createChooser(Context context, ModelPackage.Result result) {
-    Uri uri = FileProvider.getUriForFile(context, BuildConfig.APPLICATION_ID + ".provider", result.file);
-    Intent send = createSendIntent(uri, result.mimeType, result.file.getName());
-    Intent chooser = Intent.createChooser(send, context.getString(R.string.share_model_title));
+    return createChooser(context, result.file, result.mimeType, R.string.share_model_title);
+  }
+
+  public static Intent createChooser(Context context, File file, String mimeType, int title) {
+    Uri uri = FileProvider.getUriForFile(context, BuildConfig.APPLICATION_ID + ".provider", file);
+    Intent send = createSendIntent(uri, mimeType, file.getName());
+    Intent chooser = Intent.createChooser(send, context.getString(title));
     chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
     chooser.setClipData(send.getClipData());
     return chooser;

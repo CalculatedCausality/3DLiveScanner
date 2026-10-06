@@ -71,10 +71,7 @@ public class Service extends android.app.Service
       } catch (Throwable throwable) {
         Log.e(AbstractActivity.TAG, "Background processing failed", throwable);
         running = false;
-        SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(Service.this).edit();
-        editor.putInt(SERVICE_RUNNING, SERVICE_NOT_RUNNING);
-        editor.putString(SERVICE_LINK, "");
-        editor.apply();
+        editState(Service.this, SERVICE_NOT_RUNNING, "").apply();
         stopForegroundWork();
       } finally {
         workerRunning = false;
@@ -105,10 +102,7 @@ public class Service extends android.app.Service
   {
     running = false;
     if (service != null) service.stopForegroundWork();
-    SharedPreferences.Editor e = PreferenceManager.getDefaultSharedPreferences(parent).edit();
-    e.putInt(SERVICE_RUNNING, -Math.abs(getRunning(parent)));
-    e.putString(SERVICE_LINK, link);
-    e.commit();
+    editState(parent, -Math.abs(getRunning(parent)), link).commit();
     System.exit(0);
   }
 
@@ -116,10 +110,7 @@ public class Service extends android.app.Service
   {
     running = false;
     if (service != null) service.stopForegroundWork();
-    SharedPreferences.Editor e = PreferenceManager.getDefaultSharedPreferences(activity).edit();
-    e.putInt(SERVICE_RUNNING, -Math.abs(state));
-    e.putString(SERVICE_LINK, link);
-    e.commit();
+    editState(activity, -Math.abs(state), link).commit();
     System.exit(0);
   }
 
@@ -139,10 +130,7 @@ public class Service extends android.app.Service
     parent = activity;
     messageNotification = message;
 
-    SharedPreferences.Editor e = PreferenceManager.getDefaultSharedPreferences(activity).edit();
-    e.putInt(SERVICE_RUNNING, serviceId);
-    e.putString(SERVICE_LINK, "");
-    e.commit();
+    editState(activity, serviceId, "").commit();
     Intent intent = new Intent(activity, Service.class);
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -183,20 +171,17 @@ public class Service extends android.app.Service
   }
 
   public static synchronized void clearAbandonedState(Context context) {
-    SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(context).edit();
-    editor.putInt(SERVICE_RUNNING, SERVICE_NOT_RUNNING);
-    editor.putString(SERVICE_LINK, "");
-    editor.apply();
+    editState(context, SERVICE_NOT_RUNNING, "").apply();
+  }
+
+  private static SharedPreferences.Editor editState(Context context, int state, String link) {
+    return PreferenceManager.getDefaultSharedPreferences(context).edit()
+            .putInt(SERVICE_RUNNING, state).putString(SERVICE_LINK, link);
   }
 
   private static synchronized void setMessage(String msg)
   {
     message = msg;
-  }
-
-  public static synchronized void setMessageNotification(String msg)
-  {
-    messageNotification = msg;
   }
 
   public static synchronized void reset(Context context)
@@ -208,10 +193,7 @@ public class Service extends android.app.Service
     {
       e.printStackTrace();
     }
-    SharedPreferences.Editor e = PreferenceManager.getDefaultSharedPreferences(context).edit();
-    e.putInt(SERVICE_RUNNING, SERVICE_NOT_RUNNING);
-    e.putString(SERVICE_LINK, "");
-    e.commit();
+    editState(context, SERVICE_NOT_RUNNING, "").commit();
     starting = false;
     action = null;
     parent = null;

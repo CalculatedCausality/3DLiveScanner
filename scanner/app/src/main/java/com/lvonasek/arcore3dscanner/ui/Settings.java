@@ -54,11 +54,10 @@ public class Settings extends PreferenceActivity {
     keepUpdated((ListPreference) findPreference(getString(R.string.pref_resolution)));
 
     //visual updates
-    findPreference("src_hardware").setOnPreferenceClickListener(fixBackground);
-    findPreference("src_realtime").setOnPreferenceClickListener(fixBackground);
-    findPreference("src_parameters").setOnPreferenceClickListener(fixBackground);
-    findPreference("src_postprocess").setOnPreferenceClickListener(fixBackground);
-    findPreference("src_visualisations").setOnPreferenceClickListener(fixBackground);
+    for (String key : new String[]{"src_hardware", "src_realtime", "src_parameters",
+            "src_postprocess", "src_visualisations"}) {
+      findPreference(key).setOnPreferenceClickListener(fixBackground);
+    }
   }
 
   private void keepUpdated(ListPreference pref) {

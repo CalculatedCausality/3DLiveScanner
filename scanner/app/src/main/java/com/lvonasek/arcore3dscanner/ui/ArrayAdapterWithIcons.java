@@ -15,9 +15,9 @@ import java.util.List;
 
 public class ArrayAdapterWithIcons extends BaseAdapter {
 
-    private Context context;
-    private List<Drawable> icons;
-    private List<String> strings;
+    private final Context context;
+    private final List<Drawable> icons;
+    private final List<String> strings;
 
     public ArrayAdapterWithIcons(Context context, List<String> strings, List<Drawable> icons) {
         this.context = context;
@@ -43,8 +43,7 @@ public class ArrayAdapterWithIcons extends BaseAdapter {
     @Override
     public View getView(int i, View view, ViewGroup viewGroup) {
         if (view == null) {
-            LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-            view = inflater.inflate(R.layout.view_texticon, viewGroup, false);
+            view = LayoutInflater.from(context).inflate(R.layout.view_texticon, viewGroup, false);
         }
 
         TextView text = view.findViewById(R.id.name);
