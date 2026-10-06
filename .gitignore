@@ -13,3 +13,8 @@
 *local.properties
 arcore/jni/x86
 arcore/jni/x86_64
+
+# Generated host-test and Python tooling files.
+__pycache__/
+*.py[cod]
+.pytest_cache/
