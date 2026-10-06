@@ -1,8 +1,5 @@
 # Content of this repository
 
-## night_vision
-Viewer of ToF sensor data. This project could be used as night vision: https://www.xda-developers.com/huawei-p30-pro-honor-view-20-night-vision/
-
 ## scanner
 The main project of this repository containing 3D Live Scanner: https://youtu.be/ku_Slo-li3c
 
